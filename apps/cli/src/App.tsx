@@ -11,6 +11,9 @@ import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { messageGrantsWriteApproval } from './trainingWheels.js'
+import type { RoleAssignment } from '@swarm/config'
+import { ROLE_NAMES, listPresets, BUILT_IN_PRESETS } from '@swarm/config'
+import type { RoleName } from '@swarm/config'
 
 interface AppProps {
   agent: Agent
@@ -18,6 +21,8 @@ interface AppProps {
   adaptedTools: AgentTool[]
   trainingWheels?: boolean
   writePassState?: { approved: boolean }
+  activePreset?: string
+  allRoles?: Record<RoleName, RoleAssignment>
 }
 
 let _idCounter = 0
@@ -48,7 +53,7 @@ function buildHandoffPrompt(pct: number): string {
   )
 }
 
-export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState }: AppProps) {
+export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles }: AppProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [cost] = useState<number>(0)
@@ -394,15 +399,34 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         break
       }
 
-      case 'config':
+      case 'config': {
+        const roleLines = allRoles
+          ? ROLE_NAMES.map(r => `  ${r.padEnd(14)}: ${allRoles[r].model} (${allRoles[r].provider})`).join('\n')
+          : '  (no role config)'
         setMessages(prev => [...prev, systemMsg(
           `Config\n` +
           `  Working dir : ${workingDir}\n` +
           `  Config file : ~/.swarm/config.toml\n` +
+          `  Preset      : ${activePreset}\n` +
           `  Model       : ${agent.model}\n` +
-          `  Provider    : ${agent.providerId}`
+          `  Provider    : ${agent.providerId}\n` +
+          `\nRole Assignments\n${roleLines}`
         )])
         break
+      }
+
+      case 'preset': {
+        const available = ['default', 'quality', 'fast', 'local', 'mixed']
+        const roleLines = allRoles
+          ? ROLE_NAMES.map(r => `  ${r.padEnd(14)}: ${allRoles[r].model} (${allRoles[r].provider})`).join('\n')
+          : ''
+        setMessages(prev => [...prev, systemMsg(
+          `Active preset: ${activePreset}\n\nRole assignments:\n${roleLines}\n\n` +
+          `Available presets: ${available.join(', ')}\n` +
+          `Switch with --preset <name> at startup.`
+        )])
+        break
+      }
 
       case 'exit':
         process.exit(0)

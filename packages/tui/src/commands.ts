@@ -20,6 +20,7 @@ export const BUILT_IN_COMMANDS: SlashCommand[] = [
   { type: 'action', name: 'compact',         description: 'Compact conversation history to save context' },
   { type: 'action', name: 'config',          description: 'Show current config and working directory' },
   { type: 'action', name: 'exit',            description: 'Exit Pi3' },
+  { type: 'action', name: 'preset',          description: 'Show or switch model preset (quality / fast / local / mixed)' },
   { type: 'action', name: 'help',            description: 'Show available commands and keybindings' },
   { type: 'action', name: 'mcp',             description: 'Show MCP server status' },
   { type: 'action', name: 'model',           description: 'Switch provider and model' },

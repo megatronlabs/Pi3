@@ -5,7 +5,7 @@ import { Command } from 'commander'
 import { providerRegistry, AnthropicProvider, OpenRouterProvider, OllamaProvider, ReplicateProvider } from '@swarm/providers'
 import { Agent, SwarmAgentTool } from '@swarm/orchestrator'
 import { defaultTools } from '@swarm/tools'
-import { loadConfig, initConfig, resolveProviderKey, resolveBaseUrl, CONFIG_PATH } from '@swarm/config'
+import { loadConfig, initConfig, resolveProviderKey, resolveBaseUrl, CONFIG_PATH, resolveRole, resolveAllRoles, listPresets } from '@swarm/config'
 import { App } from './App'
 import { adaptTools } from './adaptTool'
 import { wrapWithTrainingWheels } from './trainingWheels'
@@ -21,7 +21,8 @@ const program = new Command()
   .option('--init-config', 'Create default config file at ~/.swarm/config.toml and exit')
   .option('-s, --swarm', 'Enable swarm mode (agent can spawn sub-agents via spawn_agent tool)')
   .option('--training-wheels', 'Restrict agent to read-only within working directory; writes require user approval')
-  .action(async (opts: { model?: string; provider?: string; workingDir: string; initConfig?: boolean; swarm?: boolean; trainingWheels?: boolean }) => {
+  .option('--preset <preset>', 'Model preset to use: quality | fast | local | mixed | default')
+  .action(async (opts: { model?: string; provider?: string; workingDir: string; initConfig?: boolean; swarm?: boolean; trainingWheels?: boolean; preset?: string }) => {
     // Handle --init-config flag
     if (opts.initConfig) {
       await initConfig()
@@ -32,9 +33,16 @@ const program = new Command()
     // Load config (returns defaults if file doesn't exist)
     const config = await loadConfig()
 
+    // Resolve active preset (CLI flag > config file > 'default')
+    const activePreset = opts.preset ?? config.defaults.preset ?? 'default'
+
+    // Resolve chat role for the main agent (overridden by -m/-p flags)
+    const chatRole = resolveRole(config, 'chat', activePreset)
+    const allRoles = resolveAllRoles(config, activePreset)
+
     // Apply config defaults for any flags not explicitly passed on CLI
-    const providerName: string = opts.provider ?? config.defaults.provider
-    const model: string = opts.model ?? config.defaults.model
+    const providerName: string = opts.provider ?? chatRole.provider
+    const model: string = opts.model ?? chatRole.model
     const workingDir: string = opts.workingDir !== process.cwd()
       ? opts.workingDir
       : (config.defaults.working_dir ?? opts.workingDir)
@@ -135,6 +143,8 @@ const program = new Command()
         adaptedTools={sandboxedTools}
         trainingWheels={opts.trainingWheels ?? false}
         writePassState={writePassState}
+        activePreset={activePreset}
+        allRoles={allRoles}
       />,
       { exitOnCtrlC: true },
     )
