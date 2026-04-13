@@ -18,20 +18,49 @@ A multi-agent AI terminal built on Ink v6, React 19, and Bun. Pi3 gives you a fu
 
 ---
 
-## Requirements
+## Install — Mac
 
-- [Bun](https://bun.sh) v1.1+
-- Node 20+ (for type checking)
-- An Ollama install for local models, or an API key for cloud providers
+### Option 1: One-line installer (recommended)
 
----
+Downloads the correct binary for your Mac (Apple Silicon or Intel) and installs it to `/usr/local/bin/pi3`.
 
-## Install
+```bash
+curl -fsSL https://raw.githubusercontent.com/megatronlabs/Pi3/main/install.sh | bash
+```
+
+### Option 2: Download binary manually
+
+Grab the latest binary from the [Releases](https://github.com/megatronlabs/Pi3/releases) page:
+
+| Mac | Binary |
+|---|---|
+| Apple Silicon (M1/M2/M3/M4) | `pi3-mac-arm64` |
+| Intel | `pi3-mac-x64` |
+
+```bash
+# Apple Silicon example
+curl -fsSL https://github.com/megatronlabs/Pi3/releases/latest/download/pi3-mac-arm64 -o pi3
+chmod +x pi3
+sudo mv pi3 /usr/local/bin/pi3
+```
+
+### Option 3: From source
+
+Requires [Bun](https://bun.sh) v1.1+.
 
 ```bash
 git clone https://github.com/megatronlabs/Pi3.git
 cd Pi3
 bun install
+bun run build:mac        # builds dist/pi3-mac-arm64 + dist/pi3-mac-x64
+sudo cp dist/pi3-mac-arm64 /usr/local/bin/pi3   # Apple Silicon
+# sudo cp dist/pi3-mac-x64 /usr/local/bin/pi3   # Intel
+```
+
+Or run directly without installing:
+
+```bash
+pi3
 ```
 
 ---
@@ -39,8 +68,8 @@ bun install
 ## Setup
 
 ```bash
-# Generate config file at ~/.swarm/config.toml
-bun run apps/cli/src/index.tsx --init-config
+# Generate config at ~/.swarm/config.toml
+pi3 --init-config
 ```
 
 Edit `~/.swarm/config.toml` to set your default model, provider, and API keys.
@@ -51,25 +80,25 @@ Edit `~/.swarm/config.toml` to set your default model, provider, and API keys.
 
 ```bash
 # Ollama — no key needed
-bun run apps/cli/src/index.tsx -p ollama -m gemma3:4b
+pi3 -p ollama -m gemma3:4b
 
 # Better tool use with a larger local model
 ollama pull qwen2.5:7b
-bun run apps/cli/src/index.tsx -p ollama -m qwen2.5:7b
+pi3 -p ollama -m qwen2.5:7b
 
 # Anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
-bun run apps/cli/src/index.tsx
+pi3
 
 # OpenRouter
 export OPENROUTER_API_KEY=sk-or-...
-bun run apps/cli/src/index.tsx -p openrouter -m mistralai/mistral-large
+pi3 -p openrouter -m mistralai/mistral-large
 
 # Swarm mode — agent can spawn sub-agents
-bun run apps/cli/src/index.tsx --swarm
+pi3 --swarm
 
 # Training wheels — read-only, writes require approval
-bun run apps/cli/src/index.tsx --training-wheels
+pi3 --training-wheels
 ```
 
 ---
@@ -147,8 +176,8 @@ Each task type can use a different model. Configure roles in `~/.swarm/config.to
 | `mixed` | Local for chat/orchestration, cloud for coding/planning |
 
 ```bash
-bun run apps/cli/src/index.tsx --preset quality
-bun run apps/cli/src/index.tsx --preset local
+pi3 --preset quality
+pi3 --preset local
 ```
 
 Define your own preset in `~/.swarm/config.toml`:

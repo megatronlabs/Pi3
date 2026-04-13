@@ -6,7 +6,11 @@
   "scripts": {
     "build": "bun run --filter '*' build",
     "dev": "bun run apps/cli/src/index.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:mac-arm": "bun build --compile --target=bun-darwin-arm64 apps/cli/src/index.tsx --outfile dist/pi3-mac-arm64",
+    "build:mac-x64": "bun build --compile --target=bun-darwin-x64  apps/cli/src/index.tsx --outfile dist/pi3-mac-x64",
+    "build:mac": "mkdir -p dist && bun run build:mac-arm && bun run build:mac-x64",
+    "release": "bun run build:mac && echo 'Binaries ready in dist/'"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
