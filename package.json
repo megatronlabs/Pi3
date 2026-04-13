@@ -1,0 +1,16 @@
+{
+  "name": "swarm",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "build": "bun run --filter '*' build",
+    "dev": "bun run apps/cli/src/index.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/react": "^19.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

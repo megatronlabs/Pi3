@@ -1,0 +1,23 @@
+{
+  "name": "@swarm/tui",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.tsx",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ink": "^6.0.0",
+    "react": "^19.0.0",
+    "chalk": "^5.4.1",
+    "figures": "^6.1.0",
+    "wrap-ansi": "^9.0.0",
+    "strip-ansi": "^7.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}
