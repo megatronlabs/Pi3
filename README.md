@@ -1,6 +1,6 @@
 # 🧠 Pi3
 
-A multi-agent AI terminal built on Ink v6, React 19, and Bun. Pi3 gives you a Claude Code-style TUI that works with any provider — Anthropic, Ollama, OpenRouter, Replicate — and can orchestrate multiple agents in parallel.
+A multi-agent AI terminal built on Ink v6, React 19, and Bun. Pi3 gives you a full coding agent in a terminal UI — file reading, editing, bash, search — across any provider: Anthropic, Ollama, OpenRouter, Replicate. Run one agent or orchestrate a swarm of them in parallel.
 
 ---
 
@@ -12,6 +12,7 @@ A multi-agent AI terminal built on Ink v6, React 19, and Bun. Pi3 gives you a Cl
 - **Swarm mode** — main agent can spawn sub-agents via `spawn_agent` tool. Parallel task execution with a live AgentPanel overlay.
 - **Context window meter** — live `████░░░░░░ 34% 🤔` bar in the status line, colored by fill level. Auto-triggers a Handoff Transcript at 85%.
 - **Slash commands** — `/clear`, `/compact`, `/status`, `/config`, `/model`, `/help`, `/exit`, `/mcp`, `/training-wheels`. Tab to autocomplete.
+- **Model roles + presets** — assign different models to different tasks (chat, coding, planning, reasoning, orchestration, image, video, summarization, search). Switch between built-in presets (`quality`, `fast`, `local`, `mixed`) or define your own in config.
 - **Training wheels mode** — restricts the agent to read-only within the working directory. Writes require explicit user approval.
 - **Tokyo Night theme** — dark only for v1.
 
@@ -116,6 +117,51 @@ The status bar shows a live context fill meter:
 ```
 
 At **85%** the agent automatically composes a Handoff Transcript and Memory file to `~/.swarm/handoff/`, so the next session can continue seamlessly.
+
+---
+
+## Model Roles & Presets
+
+Each task type can use a different model. Configure roles in `~/.swarm/config.toml` or switch presets at startup with `--preset`.
+
+| Role | Purpose |
+|---|---|
+| `chat` | General conversation |
+| `coding` | Code generation, editing, debugging |
+| `planning` | Architecture, task decomposition |
+| `reasoning` | Deep analysis, complex multi-step problems |
+| `orchestration` | Coordinator / swarm spawner |
+| `image` | Image generation |
+| `video` | Video generation |
+| `summarization` | Compaction, document summarization |
+| `search` | Web search augmented tasks |
+
+**Built-in presets:**
+
+| Preset | Description |
+|---|---|
+| `default` | Use `[roles]` section or `defaults.model` for everything |
+| `quality` | Best-in-class cloud models per role (Opus for planning, Sonnet for coding) |
+| `fast` | Fastest / cheapest cloud models across all roles |
+| `local` | Fully local — all roles use Ollama |
+| `mixed` | Local for chat/orchestration, cloud for coding/planning |
+
+```bash
+bun run apps/cli/src/index.tsx --preset quality
+bun run apps/cli/src/index.tsx --preset local
+```
+
+Define your own preset in `~/.swarm/config.toml`:
+
+```toml
+[presets.mypreset]
+chat          = { model = "qwen2.5:7b", provider = "ollama" }
+coding        = { model = "claude-sonnet-4-6", provider = "anthropic" }
+planning      = { model = "claude-opus-4-6", provider = "anthropic" }
+orchestration = { model = "qwen2.5:3b", provider = "ollama" }
+```
+
+Use `/preset` in the TUI to view the active preset and all role assignments.
 
 ---
 
