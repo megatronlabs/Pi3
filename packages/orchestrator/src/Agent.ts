@@ -155,6 +155,13 @@ export class Agent {
     this.engine.compact(keepLast)
   }
 
+  /** Hot-swap the provider and model mid-session. */
+  swapProvider(provider: Provider, model: string): void {
+    this.engine.swapProvider(provider, model)
+    ;(this as any).model = model
+    ;(this as any).providerId = provider.id
+  }
+
   /** Unsubscribe from the bus and deregister from the agent registry (call on agent teardown) */
   dispose(): void {
     this._unsubscribeBus?.()

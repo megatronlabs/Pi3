@@ -165,6 +165,12 @@ export class QueryEngine {
     this.history = []
   }
 
+  /** Hot-swap the provider and model mid-session. */
+  swapProvider(provider: Provider, model: string): void {
+    this.options.provider = provider
+    this.options.model = model
+  }
+
   /**
    * Compact history by keeping only the last `keepLast` messages.
    * Older messages are discarded. Defaults to 20.

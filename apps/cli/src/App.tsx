@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { useInput, type Key } from 'ink'
-import { ThemeProvider, FullscreenLayout } from '@swarm/tui'
-import type { ChatMessage, MessageContent, AgentWorkerStatus, TaskSummary } from '@swarm/tui'
+import { ThemeProvider, FullscreenLayout, getTheme, THEMES, darkTheme } from '@swarm/tui'
+import type { ChatMessage, MessageContent, AgentWorkerStatus, TaskSummary, Theme } from '@swarm/tui'
 import type { Agent, AgentTool } from '@swarm/orchestrator'
 import { Coordinator } from '@swarm/orchestrator'
 import type { CoordinatorEvent } from '@swarm/orchestrator'
@@ -31,6 +31,9 @@ interface AppProps {
   contextThreshold?: number
   handoffDir?: string
   sessionId?: string
+  theme?: Theme
+  providers?: Array<{ id: string; name: string; models: string[] }>
+  onModelSwap?: (provider: string, model: string) => void
 }
 
 let _idCounter = 0
@@ -59,8 +62,9 @@ function buildHandoffPrompt(pct: number, handoffDir: string): string {
   )
 }
 
-export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId }: AppProps) {
+export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId, theme, providers, onModelSwap }: AppProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [activeTheme, setActiveTheme] = useState<Theme>(theme ?? darkTheme)
   const [isStreaming, setIsStreaming] = useState(false)
   const [cost] = useState<number>(0)
   const [contextTokens, setContextTokens] = useState(0)
@@ -70,6 +74,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
   const [coordinator, setCoordinator] = useState<Coordinator | undefined>(undefined)
   const [commLog, setCommLog] = useState<AgentMessage[]>([])
   const [showCommLog, setShowCommLog] = useState(false)
+  const [showModelPicker, setShowModelPicker] = useState(false)
 
   // Track the current assistant message id across streaming events
   const assistantMsgIdRef = useRef<string | null>(null)
@@ -239,7 +244,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
     })()
   }, [contextPct, contextThreshold, isStreaming, agent, memoryProvider, handoffDir, sessionId])
 
-  // Ctrl+W toggles AgentPanel · Ctrl+L toggles CommLog
+  // Ctrl+W toggles AgentPanel · Ctrl+L toggles CommLog · Ctrl+M toggles ModelPicker
   useInput((input: string, key: Key) => {
     if (key.ctrl && input.toLowerCase() === 'w') {
       setShowAgentPanel(prev => !prev)
@@ -247,11 +252,36 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
     if (key.ctrl && input.toLowerCase() === 'l') {
       setShowCommLog(prev => !prev)
     }
+    if (key.ctrl && input.toLowerCase() === 'm') {
+      setShowModelPicker(prev => !prev)
+    }
   })
 
   const onSubmit = useCallback(
     (text: string) => {
       if (isStreaming) return
+
+      // Handle /theme <name> typed with argument (e.g. "/theme catppuccin")
+      if (text.startsWith('/theme ')) {
+        const name = text.slice(7).trim()
+        const resolved = getTheme(name)
+        const known = Object.keys(THEMES)
+        if (!known.includes(name)) {
+          setMessages(prev => [...prev, {
+            id: nextId(), role: 'assistant',
+            content: [{ kind: 'text', text: `Unknown theme "${name}". Available: ${known.join(', ')}` }],
+            timestamp: new Date(),
+          }])
+        } else {
+          setActiveTheme(resolved)
+          setMessages(prev => [...prev, {
+            id: nextId(), role: 'assistant',
+            content: [{ kind: 'text', text: `Theme switched to "${name}".` }],
+            timestamp: new Date(),
+          }])
+        }
+        return
+      }
 
       // Training wheels: detect write approval in user message
       if (trainingWheels && writePassState && messageGrantsWriteApproval(text)) {
@@ -476,11 +506,13 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
           `  /mcp              MCP server status\n` +
           `  /model            Switch provider / model\n` +
           `  /status           Session status\n` +
+          `  /theme            Switch UI theme\n` +
           `  /training-wheels  Training wheels status\n` +
           `\n` +
           `Keybindings\n` +
           `  Ctrl+W   Toggle agent panel\n` +
           `  Ctrl+L   Toggle comm log\n` +
+          `  Ctrl+M   Toggle model picker\n` +
           `  Ctrl+C   Exit`
         )])
         break
@@ -494,8 +526,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         break
 
       case 'model':
-        // TODO: wire up model picker overlay
-        setMessages(prev => [...prev, systemMsg(`Model picker coming soon — use -m flag for now.`)])
+        setShowModelPicker(true)
         break
 
       case 'status': {
@@ -511,6 +542,18 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         break
       }
 
+      case 'theme': {
+        const available = Object.keys(THEMES)
+        const current = available.find(k => THEMES[k] === activeTheme) ?? 'custom'
+        setMessages(prev => [...prev, systemMsg(
+          `Theme\n` +
+          `  Current : ${current}\n` +
+          `  Available: ${available.join(', ')}\n\n` +
+          `Switch with /theme <name>  (e.g. /theme catppuccin)`
+        )])
+        break
+      }
+
       case 'training-wheels':
         setMessages(prev => [...prev, systemMsg(
           trainingWheels
@@ -519,10 +562,21 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         )])
         break
     }
-  }, [agent, workingDir, contextPct, contextWindow, trainingWheels])
+  }, [agent, workingDir, contextPct, contextWindow, trainingWheels, activeTheme])
+
+  function handlePickerSelect(providerId: string, model: string): void {
+    setShowModelPicker(false)
+    onModelSwap?.(providerId, model)
+    setMessages(prev => [...prev, {
+      id: nextId(),
+      role: 'assistant',
+      content: [{ kind: 'text', text: `Switched to ${model} (${providerId})` }],
+      timestamp: new Date(),
+    }])
+  }
 
   return (
-    <ThemeProvider>
+    <ThemeProvider theme={activeTheme}>
       <FullscreenLayout
         messages={messages}
         onSubmit={onSubmit}
@@ -542,6 +596,10 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         commLog={commLog}
         showCommLog={showCommLog && commLog.length > 0}
         commMode={commMode}
+        showPicker={showModelPicker}
+        pickerProviders={providers}
+        onPickerSelect={handlePickerSelect}
+        onPickerCancel={() => setShowModelPicker(false)}
       />
     </ThemeProvider>
   )

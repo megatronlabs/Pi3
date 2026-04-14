@@ -7,6 +7,8 @@ import { Agent, SwarmAgentTool } from '@swarm/orchestrator'
 import { defaultTools } from '@swarm/tools'
 import { loadConfig, initConfig, resolveProviderKey, resolveBaseUrl, CONFIG_PATH, resolveRole, resolveAllRoles, listPresets } from '@swarm/config'
 import { App } from './App'
+import { getTheme, applyThemeOverrides } from '@swarm/tui'
+import type { BorderStyle } from '@swarm/tui'
 import { adaptTools } from './adaptTool'
 import { wrapWithTrainingWheels } from './trainingWheels'
 import type { Provider } from '@swarm/providers'
@@ -41,11 +43,31 @@ const program = new Command()
     const config = await loadConfig()
 
     // -------------------------------------------------------------------------
+    // Hub server (optional — only when config.hub.persist = true)
+    // -------------------------------------------------------------------------
+    let hubBaseUrl: string | undefined
+    if (config.hub.persist) {
+      try {
+        const { HubServer } = await import('@swarm/hub')
+        const hubServer = new HubServer({
+          port: config.hub.port,
+          dataDir: expandPath('~/.swarm/hub'),
+        })
+        await hubServer.start()
+        hubBaseUrl = `http://localhost:${config.hub.port}`
+        process.on('exit', () => { hubServer.stop().catch(() => {}) })
+      } catch (err) {
+        process.stderr.write(`[swarm] Hub failed to start: ${err}\n`)
+      }
+    }
+
+    // -------------------------------------------------------------------------
     // Telemetry
     // -------------------------------------------------------------------------
     telemetry.init({
       enabled: config.telemetry.enabled,
-      otlpEndpoint: config.telemetry.otlp_endpoint || undefined,
+      // Point OTLP at the hub when running; otherwise fall back to config value
+      otlpEndpoint: hubBaseUrl ?? (config.telemetry.otlp_endpoint || undefined),
       logFile: config.telemetry.log_file,
       logLevel: config.telemetry.log_level,
     })
@@ -80,7 +102,8 @@ const program = new Command()
       backend:              config.memory.backend,
       path:                 config.memory.path,
       obsidian_vault:       config.memory.obsidian_vault || undefined,
-      agentsynapse_url:     config.memory.agentsynapse_url,
+      // When hub is running, route memory through it; otherwise use config URL
+      agentsynapse_url:     hubBaseUrl ?? config.memory.agentsynapse_url,
       agentsynapse_project: config.memory.agentsynapse_project,
     })
     const contextThreshold = config.memory.context_threshold
@@ -205,6 +228,33 @@ const program = new Command()
       registry,
     })
 
+    // Resolve theme from config
+    const baseTheme = getTheme(config.defaults.theme)
+    const themeOverrides = config.theme
+    const theme = applyThemeOverrides(baseTheme, {
+      ...(themeOverrides.border_style && { borderStyle: themeOverrides.border_style as BorderStyle }),
+      ...(themeOverrides.primary && { primary: themeOverrides.primary }),
+      ...(themeOverrides.secondary && { secondary: themeOverrides.secondary }),
+      ...(themeOverrides.muted && { muted: themeOverrides.muted }),
+      ...(themeOverrides.accent && { accent: themeOverrides.accent }),
+      ...(themeOverrides.error && { error: themeOverrides.error }),
+      ...(themeOverrides.warning && { warning: themeOverrides.warning }),
+      ...(themeOverrides.success && { success: themeOverrides.success }),
+      ...(themeOverrides.user && { user: themeOverrides.user }),
+      ...(themeOverrides.assistant && { assistant: themeOverrides.assistant }),
+      ...(themeOverrides.tool && { tool: themeOverrides.tool }),
+      ...(themeOverrides.thinking && { thinking: themeOverrides.thinking }),
+      ...(themeOverrides.border && { border: themeOverrides.border }),
+      ...(themeOverrides.input_border && { inputBorder: themeOverrides.input_border }),
+    })
+
+    const KNOWN_PROVIDERS = [
+      { id: 'anthropic',  name: 'Anthropic',  models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'] },
+      { id: 'openrouter', name: 'OpenRouter', models: ['openai/gpt-4o', 'anthropic/claude-opus-4-6', 'meta-llama/llama-3.1-70b-instruct'] },
+      { id: 'ollama',     name: 'Ollama',     models: ['gemma3:4b', 'gemma3:12b', 'llama3.2:3b', 'mistral:7b', 'deepseek-r1:7b'] },
+      { id: 'replicate',  name: 'Replicate',  models: ['meta/llama-3-70b-instruct', 'mistralai/mistral-7b-instruct-v0.2'] },
+    ]
+
     // Render TUI
     const { waitUntilExit } = render(
       <App
@@ -221,6 +271,28 @@ const program = new Command()
         contextThreshold={contextThreshold}
         handoffDir={handoffDir}
         sessionId={sessionId}
+        theme={theme}
+        providers={KNOWN_PROVIDERS}
+        onModelSwap={(providerId, model) => {
+          let newProvider: Provider
+          switch (providerId) {
+            case 'anthropic':
+              newProvider = new AnthropicProvider({ apiKey: resolveProviderKey(config, 'anthropic') ?? '' })
+              break
+            case 'openrouter':
+              newProvider = new OpenRouterProvider({ apiKey: resolveProviderKey(config, 'openrouter') ?? '', baseUrl: resolveBaseUrl(config, 'openrouter') })
+              break
+            case 'ollama':
+              newProvider = new OllamaProvider({ baseUrl: resolveBaseUrl(config, 'ollama') ?? 'http://localhost:11434' })
+              break
+            case 'replicate':
+              newProvider = new ReplicateProvider({ apiKey: resolveProviderKey(config, 'replicate') ?? '' })
+              break
+            default:
+              return
+          }
+          agent.swapProvider(newProvider, model)
+        }}
       />,
       { exitOnCtrlC: true },
     )
