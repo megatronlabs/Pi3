@@ -48,6 +48,7 @@ export interface AgentMessage {
   language: CommunicationLanguage
   content: string            // serialized message body
   correlationId?: string     // reply → original query linkage
+  replyTo?: string           // thread this message off any prior message (more general than correlationId)
   timestamp: Date
   // OTEL-compatible tracing fields
   traceId: string

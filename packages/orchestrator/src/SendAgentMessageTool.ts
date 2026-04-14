@@ -33,6 +33,11 @@ const SendAgentMessageInputSchema = z.object({
     .optional()
     .describe('For reply messages: the id of the original query you are responding to'),
 
+  reply_to: z
+    .string()
+    .optional()
+    .describe('Thread this message off any prior message by its id (more general than correlation_id)'),
+
   await_reply: z
     .boolean()
     .optional()
@@ -86,6 +91,7 @@ export class SendAgentMessageTool implements AgentTool<SendAgentMessageInput, st
       language,
       content: input.content,
       correlationId: input.correlation_id,
+      replyTo: input.reply_to,
       parentSpanId: traceId,
     })
 
