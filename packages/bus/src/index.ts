@@ -6,4 +6,5 @@ export type {
 } from './types.js'
 
 export { createMessage, formatMessageForContext } from './types.js'
-export { MessageBus } from './MessageBus.js'
+export { MessageBus, BusCapacityError } from './MessageBus.js'
+export type { MessageBusOptions } from './MessageBus.js'

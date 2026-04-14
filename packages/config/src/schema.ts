@@ -84,6 +84,10 @@ export const ConfigSchema = z.object({
     mode: z.enum(['orchestrated', 'choreographed', 'adhoc']).default('orchestrated'),
     /** How long (ms) to wait for a banter reply before timing out */
     await_reply_timeout_ms: z.number().int().positive().default(30_000),
+    /** Hard cap on total messages published per session; throws BusCapacityError when exceeded */
+    max_messages_per_session: z.number().int().positive().default(500),
+    /** Directory for per-agent inbox persistence. ~ is expanded to $HOME. */
+    inbox_dir: z.string().default('~/.swarm/inbox'),
   }).default({}),
 
   telemetry: z.object({

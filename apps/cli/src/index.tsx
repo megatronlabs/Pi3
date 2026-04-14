@@ -59,7 +59,10 @@ const program = new Command()
 
     // Bus is always created so the CommLog panel works; it's just empty until
     // agents start sending messages.
-    const bus = new MessageBus()
+    const bus = new MessageBus({
+      maxMessages: config.communication.max_messages_per_session,
+      inboxDir: expandPath(config.communication.inbox_dir),
+    })
 
     // Wire telemetry to log every inter-agent message
     bus.monitor(msg => telemetry.logMessage(msg))
