@@ -1,18 +1,18 @@
 # Pi3 Swarm — Handoff
 
-**Date:** 2026-04-13  
-**Repo:** https://github.com/megatronlabs/Pi3  
-**Last commit:** dbaad58 — Add pluggable memory backend and configurable handoff threshold
+**Date:** 2026-04-14
+**Repo:** https://github.com/megatronlabs/Pi3
+**Last commit:** b9e682d — feat(bus): wire spawn_agent to bus + inbox polling for cross-process messaging
 
 ---
 
 ## What This Project Is
 
-Multi-agent AI terminal (Claude Code-like TUI) built on Bun + Ink v6 + React 19.  
-Supports multiple LLM providers: Anthropic, OpenRouter, Ollama, Replicate.  
+Multi-agent AI terminal (Claude Code-like TUI) built on Bun + Ink v6 + React 19.
+Supports multiple LLM providers: Anthropic, OpenRouter, Ollama, Replicate.
 Run with: `bun run apps/cli/src/index.tsx -p ollama -m gemma3:4b`
 
-**Key flags:** `--swarm`, `--training-wheels`, `--preset quality|fast|local|mixed`,  
+**Key flags:** `--swarm`, `--training-wheels`, `--preset quality|fast|local|mixed`,
 `--comm-mode orchestrated|choreographed|adhoc`, `--comm-format hermes|english`
 
 ---
@@ -21,18 +21,22 @@ Run with: `bun run apps/cli/src/index.tsx -p ollama -m gemma3:4b`
 
 ```
 packages/
-  bus/          AgentMessage types, MessageBus (in-memory pub/sub, banter + fire-and-forget)
+  bus/          AgentMessage types, MessageBus (in-memory pub/sub + inbox persistence),
+                AgentRegistry (presence tracking via lastActiveAt), BusCapacityError
   telemetry/    OTEL-compatible structured logger → file + OTLP HTTP
   hermes/       Hermes XML format serializer/parser
   providers/    Anthropic, Ollama, OpenRouter, Replicate adapters
   tui/          Ink components: FullscreenLayout, MessageList, PromptInput, StatusLine,
-                AgentPanel, CommLog, SlashMenu
+                AgentPanel, CommLog, SlashMenu, ModelPicker
   tools/        BashTool, FileRead/Write/Edit, Glob, Grep
-  orchestrator/ Agent (bus-aware), QueryEngine, Coordinator, TaskGraph, WorkerPool,
-                SwarmAgentTool, SendAgentMessageTool
+  orchestrator/ Agent (bus-aware, registry-aware), QueryEngine, Coordinator, TaskGraph,
+                WorkerPool, SwarmAgentTool (spawn_agent), SendAgentMessageTool,
+                SwarmPlannerTools (SwarmAddTaskTool + SwarmRunTool)
   config/       ~/.swarm/config.toml schema + loaders
   hub/          MemoryProvider interface + MarkdownMemoryProvider, ObsidianMemoryProvider,
-                AgentSynapseProvider (stub)
+                AgentSynapseProvider, HubServer (memory/OTLP/registry/sessions API),
+                SkillStore, CreateSkillTool, spawnHubDaemon
+  mcp/          McpManager, McpClient (stdio JSON-RPC), McpAgentTool
 apps/
   cli/          Entry point (index.tsx) + App.tsx (TUI state) + adaptTool.ts
 ```
@@ -41,126 +45,46 @@ apps/
 
 ## Current State — What Works
 
-- Full single-agent chat loop (streaming, tool use, multi-turn)
-- Providers: Anthropic, Ollama (tested with gemma3:4b), OpenRouter, Replicate  
-- Tools: bash, file_read, file_write, file_edit, glob, grep  
-- Slash commands: /clear /compact /config /exit /help /mcp /model /preset /status /training-wheels  
-- Ctrl+W = AgentPanel (swarm workers), Ctrl+L = CommLog (inter-agent messages), Ctrl+C = exit  
-- `send_agent_message` tool on every agent: banter (query + await_reply=true) + fire-and-forget (vote/status/result)  
-- MessageBus pub/sub in-memory; CommLog panel shows live message stream  
-- Telemetry wired to bus monitor → ~/.swarm/logs/swarm.log + optional OTLP  
-- Memory handoff at configurable context % (default 85); backend = markdown | obsidian | agentsynapse (stub)  
-- Model roles + presets system (quality / fast / local / mixed)  
-- Training wheels mode (no bash, path containment, write approval)  
+- Full single-agent chat loop (streaming, tool use, multi-turn, thinking blocks)
+- Providers: Anthropic, Ollama (tested with gemma3:4b), OpenRouter, Replicate
+- Tools: bash, file_read, file_write, file_edit, glob, grep
+- Slash commands: /clear /compact /config /exit /help /mcp /model /preset /skills /status /theme /training-wheels
+- Ctrl+W = AgentPanel (swarm workers), Ctrl+L = CommLog (inter-agent messages), Ctrl+M = ModelPicker, Ctrl+C = exit
+- **Coordinator swarm mode** (`--swarm`): agent decomposes prompt via swarm_add_task (N calls) + swarm_run → App creates WorkerPool + Coordinator → parallel task execution with dependency ordering → CoordinatorEvents update AgentPanel in real time
+- **Model live-switching** (Ctrl+M / /model): ModelPicker overlay, agent.swapProvider() mid-session; provider/model resolved from config on swap
+- **Inter-agent messaging — in-process**: MessageBus subscribe at Agent construction; messages queued in _pendingMessages, prepended to next run() prompt
+- **Inter-agent messaging — cross-process**: MessageBus._persistToInbox() writes atomic tmp→rename JSON files to ~/.swarm/inbox/<agentId>/; App polls readInbox('main') every 2s, deduplicates by seenIds, injects via agent.injectMessage()
+- **Banter (query + await reply)**: MessageBus.banter() stores Promise in _pendingBanter keyed by msg.id; resolved when a type='reply' message with matching correlationId arrives
+- Sub-agents spawned via spawn_agent subscribe to bus (bus.subscribe) and have SendAgentMessageTool automatically added to their tool list
+- **MCP integration**: McpManager.connectAll() on startup spawns child processes (stdio JSON-RPC); tools/list on connect; each tool wrapped as McpAgentTool and injected into agent; /mcp shows server status + tool count; full disconnect on exit
+- **Skill auto-creation**: create_skill tool (CreateSkillTool) → SkillStore.save() → ~/.swarm/skills/{name}.json; loaded on next session startup; /skills lists them; skill names become live slash commands that re-submit their stored prompt
+- **Agent registry**: AgentRegistry persists to ~/.swarm/agents/registry.json (atomic writes); agents register on construction, update lastActiveAt after each run(); status computed at read time from age of lastActiveAt (active <30s, idle <5min, away >5min); removed on dispose()/exit
+- **Message budget**: BusCapacityError thrown from publish()/banter() when max_messages_per_session is exceeded; configurable in [communication]
+- **Inbox persistence**: atomic writes (tmp→rename) to ~/.swarm/inbox/<agentId>/<ts>-<id>.json; broadcasts fan out to all subscriber dirs; readInbox() + clearInbox() on MessageBus
+- **Hub server**: HubServer class with memory API (store/get/search/handoff), OTLP log collector, agent registry proxy, session history; spawned as detached daemon via spawnHubDaemon() when hub.persist=true; CLI polls /health and reuses existing instance
+- **Memory handoff**: context % threshold (default 85%) triggers buildHandoffPrompt → agent writes HANDOFF.md + MEMORY.md → App calls memoryProvider.onHandoffComplete(files); backends: markdown (default), obsidian (vault copy), agentsynapse (HTTP)
+- **Themes**: dark / light / dracula / catppuccin / nord / gruvbox; selectable via /theme or defaults.theme in config; per-color overrides in [theme] section; ThemeProvider wraps entire TUI
+- Model roles + presets system (quality / fast / local / mixed); role map per preset, resolved at startup
+- Training wheels mode: bash disabled, path containment, write approval required
+- Telemetry: structured OTEL-compatible logger; wired to bus monitor; writes to ~/.swarm/logs/swarm.log; optional OTLP HTTP endpoint (auto-pointed at hub when hub is running)
 
 ---
 
-## Next Task — Pi-Messenger Pattern Additions
+## Next Tasks — Phase 4 Remaining
 
-Learned from https://github.com/nicobailon/pi-messenger. All changes are in `@swarm/bus`  
-(+ small wiring in `@swarm/orchestrator` Agent.ts and `apps/cli` index.tsx).  
-**Run typecheck after each task:** `cd packages/bus && bunx tsc --noEmit`
+1. **Remote agents** — Linux box via SSH or HTTP → Ollama. Design: a RemoteAgentTool that POSTs tasks to a running Pi3 HTTP endpoint on the remote machine; responses streamed back. Needs a minimal HTTP mode for the CLI (`--serve` flag).
 
-### Task 1 — `replyTo` field *(~5 min)*
+2. **/model overlay: dynamic model lists** — KNOWN_PROVIDERS in index.tsx has hardcoded model lists. Populate dynamically by querying each provider's API at startup (Anthropic models endpoint, Ollama `/api/tags`, OpenRouter `/api/v1/models`). Gate behind a config flag so it doesn't block startup.
 
-File: `packages/bus/src/types.ts`  
-- Add `replyTo?: string` to `AgentMessage` interface (threads any message off any other, more general than `correlationId` which is banter-only)  
-- Add `replyTo?: string` to `createMessage()` opts  
+3. **Coordinator choreographed mode** — Current Coordinator is adhoc parallel (any unblocked task runs on any idle worker). Add a choreographed mode: a linear pipeline where each agent's output is passed as input to the next, like a chain. `--comm-mode choreographed` should activate this path.
 
-File: `packages/orchestrator/src/SendAgentMessageTool.ts`  
-- Add `reply_to: z.string().optional()` to input schema  
-- Pass `replyTo: input.reply_to` in the `createMessage()` call  
+4. **AgentSynapseProvider — complete implementation** — The stub exists in `packages/hub/src/memory/AgentSynapseProvider.ts`. Now that HubServer exists and exposes a memory API, wire AgentSynapseProvider to POST handoff files to `hubBaseUrl/api/memory/handoff` and implement store/get/search against the hub's memory endpoints.
 
-### Task 2 — Message budget *(~15 min)*
+5. **Hub startup wiring** — HubServer class and spawnHubDaemon() exist and are wired in index.tsx when `hub.persist=true`. The actual daemon script (the entry point that `spawnHubDaemon` launches) needs to be confirmed/completed; verify the daemon file path and that hub data dir is initialized before the server starts.
 
-File: `packages/config/src/schema.ts`  
-- Add to `communication` section: `max_messages_per_session: z.number().int().positive().default(500)`  
+6. **Skill parametrization** — SkillStore skills have a static `prompt` field. Add `{input}` placeholder substitution: when a skill slash command is invoked with text after the command name (e.g. `/review-pr 42`), substitute `{input}` in the prompt before submitting. Requires changes in App.tsx onCommand default case.
 
-File: `packages/bus/src/MessageBus.ts`  
-- Add `MessageBusOptions { inboxDir?: string; maxMessages?: number }` interface  
-- Update constructor to accept `MessageBusOptions`  
-- Add `private _messageCount = 0`  
-- In `publish()` and `banter()`: increment counter; if `>= maxMessages`, throw `new BusCapacityError()`  
-- Export `BusCapacityError extends Error` from the package  
-
-File: `apps/cli/src/index.tsx`  
-- Pass `maxMessages: config.communication.max_messages_per_session` to `new MessageBus({ maxMessages })`  
-
-### Task 3 — Inbox persistence *(~30 min)*
-
-Goal: after in-memory delivery, also write `~/.swarm/inbox/<agentId>/<ts>-<id>.json`  
-using atomic temp-file→rename (prevents corruption from concurrent agent writes).
-
-File: `packages/bus/src/MessageBus.ts`  
-- Add `inboxDir?: string` to `MessageBusOptions`  
-- After `_route(msg)`, call `this._persistToInbox(msg)` (fire-and-forget, never throws)  
-- `_persistToInbox(msg)`:  
-  1. If no `inboxDir`, return  
-  2. Target dir: `<inboxDir>/<msg.to>/` (skip if `msg.to === 'all'` — write to each subscriber's dir instead)  
-  3. Filename: `${Date.now()}-${msg.id}.json`  
-  4. Atomic write: write to `<filename>.tmp` then `fs.rename()` to final path  
-- Add `readInbox(agentId: string): Promise<AgentMessage[]>` — reads + JSON-parses all files in `<inboxDir>/<agentId>/`, sorted by filename (chronological)  
-- Add `clearInbox(agentId: string): Promise<void>` — deletes all files in that dir  
-
-File: `packages/config/src/schema.ts`  
-- Add `communication.inbox_dir: z.string().default('~/.swarm/inbox')`  
-
-File: `apps/cli/src/index.tsx`  
-- Pass `inboxDir: expandPath(config.communication.inbox_dir)` to `new MessageBus({ ... })`  
-
-### Task 4 — Agent registry *(~30 min)*
-
-Goal: discoverable agents with presence. Agents register on startup, update each turn.  
-Status is computed from `lastActiveAt` timestamp — no heartbeats.
-
-File: `packages/bus/src/AgentRegistry.ts` *(new)*  
-```typescript
-export interface RegistryEntry {
-  id: string
-  name: string
-  model: string
-  provider: string
-  pid: number
-  sessionId: string
-  workingDir: string
-  lastActiveAt: string   // ISO 8601
-  messageCount: number
-  status?: 'active' | 'idle' | 'away'  // computed on read, not stored
-}
-
-export class AgentRegistry {
-  constructor(private registryPath: string) {}
-  async register(entry: Omit<RegistryEntry, 'status'>): Promise<void>  // atomic write
-  async update(id: string, patch: Partial<RegistryEntry>): Promise<void>
-  async list(): Promise<RegistryEntry[]>   // reads file, computes status from lastActiveAt
-  async remove(id: string): Promise<void>
-}
-// Status thresholds: active = <30s, idle = 30s–5min, away = >5min
-```
-Use atomic temp→rename for all writes.  
-
-File: `packages/bus/src/index.ts`  
-- Export `AgentRegistry` and `RegistryEntry`  
-
-File: `packages/orchestrator/src/Agent.ts`  
-- Add `registry?: AgentRegistry` to `AgentConfig`  
-- In constructor: call `registry.register({ id, name, model, ... })` (fire-and-forget)  
-- In `run()` after the loop ends: call `registry.update(id, { lastActiveAt: new Date().toISOString(), messageCount: ... })`  
-- In `dispose()`: call `registry.remove(id)`  
-
-File: `apps/cli/src/index.tsx`  
-- Create `new AgentRegistry(expandPath('~/.swarm/agents/registry.json'))`  
-- Pass to `new Agent({ ..., registry })`  
-- On process exit (`process.on('exit', ...)`): `registry.remove('main')`  
-
----
-
-## Important Rules
-
-- **CC source** = reference only (proprietary). pi-mono + hermes-agent = free to use.
-- All code must typecheck clean: `cd <package> && bunx tsc --noEmit`
-- Check all 10 packages after changes: bus, telemetry, hermes, providers, tools, orchestrator, tui, hub, config, apps/cli
-- Commit after each task, push after all 4 are clean
+7. **CommLog banter thread visualization** — CommLog currently shows a flat chronological list. Add visual grouping of query → reply pairs linked by `correlationId`, so banter exchanges are shown as threads rather than disconnected messages.
 
 ---
 
@@ -170,18 +94,42 @@ File: `apps/cli/src/index.tsx`
 [defaults]
 model = "claude-opus-4-6"
 provider = "anthropic"
+theme = "dark"          # dark | light | dracula | catppuccin | nord | gruvbox
+
+[theme]
+# Per-color overrides applied on top of the named theme (all optional)
+# border_style = "round"   # single | double | round | bold | classic
+# primary = "#ff79c6"
+# accent = "#50fa7b"
+
+[roles]
+# Direct role assignments (used when preset = "default")
+# chat = { model = "claude-opus-4-6", provider = "anthropic" }
+# coding = { model = "claude-sonnet-4-6", provider = "anthropic" }
+
+[presets.quality]
+chat = { model = "claude-opus-4-6", provider = "anthropic" }
+
+[presets.local]
+chat = { model = "gemma3:4b", provider = "ollama" }
+
+[providers.anthropic]
+api_key = ""   # or set ANTHROPIC_API_KEY env var
+
+[providers.ollama]
+base_url = "http://localhost:11434"
 
 [communication]
-format = "hermes"
-mode = "orchestrated"
+format = "hermes"                  # hermes | english
+mode = "orchestrated"              # orchestrated | choreographed | adhoc
 await_reply_timeout_ms = 30000
-max_messages_per_session = 500    # Task 2
-inbox_dir = "~/.swarm/inbox"      # Task 3
+max_messages_per_session = 500
+inbox_dir = "~/.swarm/inbox"
 
 [memory]
-backend = "markdown"
+backend = "markdown"               # markdown | obsidian | agentsynapse
 path = "~/.swarm/handoff"
-context_threshold = 85
+context_threshold = 85             # 80–95
 
 [telemetry]
 enabled = true
@@ -190,6 +138,12 @@ log_file = "~/.swarm/logs/swarm.log"
 [hub]
 port = 7777
 persist = false
+
+[[mcp.servers]]
+name = "example"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+enabled = true
 ```
 
 ---
@@ -202,10 +156,30 @@ persist = false
 | TUI state + handoff | `apps/cli/src/App.tsx` |
 | Bus types | `packages/bus/src/types.ts` |
 | MessageBus | `packages/bus/src/MessageBus.ts` |
+| AgentRegistry | `packages/bus/src/AgentRegistry.ts` |
 | Agent | `packages/orchestrator/src/Agent.ts` |
+| Coordinator | `packages/orchestrator/src/Coordinator.ts` |
+| WorkerPool | `packages/orchestrator/src/WorkerPool.ts` |
+| SwarmAgentTool (spawn_agent) | `packages/orchestrator/src/SwarmAgentTool.ts` |
+| SwarmPlannerTools | `packages/orchestrator/src/SwarmPlannerTools.ts` |
 | send_agent_message tool | `packages/orchestrator/src/SendAgentMessageTool.ts` |
 | Config schema | `packages/config/src/schema.ts` |
 | Memory providers | `packages/hub/src/memory/` |
+| SkillStore | `packages/hub/src/skills/SkillStore.ts` |
+| CreateSkillTool | `packages/hub/src/skills/CreateSkillTool.ts` |
+| Hub server | `packages/hub/src/HubServer.ts` |
+| MCP manager | `packages/mcp/src/McpManager.ts` |
+| MCP client | `packages/mcp/src/McpClient.ts` |
 | CommLog TUI | `packages/tui/src/CommLog.tsx` |
 | StatusLine | `packages/tui/src/StatusLine.tsx` |
 | Handoff prompt | `apps/cli/src/App.tsx` — `buildHandoffPrompt()` |
+| Architecture doc | `ARCHITECTURE.md` |
+
+---
+
+## Important Rules
+
+- **CC source** = reference only (proprietary). pi-mono + hermes-agent = free to use.
+- All code must typecheck clean: `cd <package> && bunx tsc --noEmit`
+- Check all packages after changes: bus, telemetry, hermes, providers, tools, orchestrator, tui, hub, config, mcp, apps/cli
+- Commit after each task, push after all are clean
