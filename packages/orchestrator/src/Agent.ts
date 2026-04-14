@@ -2,7 +2,7 @@ import type { Provider, Message } from '@swarm/providers'
 import type { AgentTool } from './AgentTool.js'
 import { QueryEngine } from './QueryEngine.js'
 import type { TurnEvent } from './QueryEngine.js'
-import type { MessageBus, AgentMessage } from '@swarm/bus'
+import type { MessageBus, AgentMessage, AgentRegistry } from '@swarm/bus'
 import { formatMessageForContext } from '@swarm/bus'
 
 export interface AgentConfig {
@@ -19,6 +19,8 @@ export interface AgentConfig {
   bus?: MessageBus
   /** Session ID — attached to every outgoing message for tracing */
   sessionId?: string
+  /** Optional agent registry for presence tracking */
+  registry?: AgentRegistry
 }
 
 export type AgentStatus = 'idle' | 'running' | 'done' | 'error'
@@ -34,6 +36,7 @@ export class Agent {
   private engine: QueryEngine
   private _pendingMessages: AgentMessage[] = []
   private _unsubscribeBus?: () => void
+  private _registry?: AgentRegistry
 
   constructor(config: AgentConfig) {
     this.id = config.id
@@ -55,6 +58,21 @@ export class Agent {
       this._unsubscribeBus = config.bus.subscribe(config.id, msg => {
         this._pendingMessages.push(msg)
       })
+    }
+
+    if (config.registry) {
+      this._registry = config.registry
+      config.registry.register({
+        id: config.id,
+        name: config.name,
+        model: config.model,
+        provider: config.provider.id,
+        pid: process.pid,
+        sessionId: this.sessionId,
+        workingDir: config.workingDir ?? process.cwd(),
+        lastActiveAt: new Date().toISOString(),
+        messageCount: 0,
+      }).catch(() => {})
     }
   }
 
@@ -89,6 +107,12 @@ export class Agent {
       if (this.status === 'running') {
         this.status = 'done'
       }
+
+      // Update presence in registry after each run
+      this._registry?.update(this.id, {
+        lastActiveAt: new Date().toISOString(),
+        messageCount: this.engine.getHistory().length,
+      }).catch(() => {})
     } catch (err) {
       this.status = 'error'
       const message = err instanceof Error ? err.message : String(err)
@@ -131,8 +155,9 @@ export class Agent {
     this.engine.compact(keepLast)
   }
 
-  /** Unsubscribe from the bus (call on agent teardown) */
+  /** Unsubscribe from the bus and deregister from the agent registry (call on agent teardown) */
   dispose(): void {
     this._unsubscribeBus?.()
+    this._registry?.remove(this.id).catch(() => {})
   }
 }

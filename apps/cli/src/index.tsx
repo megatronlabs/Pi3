@@ -10,7 +10,7 @@ import { App } from './App'
 import { adaptTools } from './adaptTool'
 import { wrapWithTrainingWheels } from './trainingWheels'
 import type { Provider } from '@swarm/providers'
-import { MessageBus } from '@swarm/bus'
+import { MessageBus, AgentRegistry } from '@swarm/bus'
 import type { CommunicationMode } from '@swarm/bus'
 import { telemetry } from '@swarm/telemetry'
 import { SendAgentMessageTool, buildCommSystemPrompt } from '@swarm/orchestrator'
@@ -63,6 +63,10 @@ const program = new Command()
       maxMessages: config.communication.max_messages_per_session,
       inboxDir: expandPath(config.communication.inbox_dir),
     })
+
+    // Agent registry — tracks running agents with presence status
+    const registry = new AgentRegistry(expandPath('~/.swarm/agents/registry.json'))
+    process.on('exit', () => { registry.remove('main').catch(() => {}) })
 
     // Wire telemetry to log every inter-agent message
     bus.monitor(msg => telemetry.logMessage(msg))
@@ -198,6 +202,7 @@ const program = new Command()
       workingDir,
       bus,
       sessionId,
+      registry,
     })
 
     // Render TUI
