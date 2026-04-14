@@ -312,6 +312,24 @@ const program = new Command()
           }
           agent.swapProvider(newProvider, model)
         }}
+        swarmMode={opts.swarm ?? false}
+        workerFactory={(count: number) => {
+          const pool = new WorkerPool()
+          const cap = Math.min(count, 4)
+          for (let i = 0; i < cap; i++) {
+            pool.addWorker({
+              id: `worker-${i}`,
+              name: `Worker ${i + 1}`,
+              provider,
+              model,
+              tools: sandboxedTools,
+              workingDir,
+              bus,
+              registry,
+            })
+          }
+          return pool
+        }}
       />,
       { exitOnCtrlC: true },
     )
