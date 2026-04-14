@@ -94,6 +94,37 @@ export const ConfigSchema = z.object({
     log_file: z.string().default('~/.swarm/logs/swarm.log'),
     log_level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   }).default({}),
+
+  memory: z.object({
+    /**
+     * markdown    — write HANDOFF.md + MEMORY.md to memory.path (default, works today)
+     * obsidian    — same files, copied into an Obsidian vault at memory.obsidian_vault
+     * agentsynapse — route to AgentSynapse at memory.agentsynapse_url (stub, pending integration)
+     * agentcognose — route to AgentCognose (stub, pending integration)
+     */
+    backend: z.enum(['markdown', 'obsidian', 'agentsynapse', 'agentcognose']).default('markdown'),
+    /** Directory for handoff files. ~ expanded. Used by markdown and obsidian as the source. */
+    path: z.string().default('~/.swarm/handoff'),
+    /** Obsidian vault path — required when backend = "obsidian" */
+    obsidian_vault: z.string().default(''),
+    /** AgentSynapse / AgentCognose base URL */
+    agentsynapse_url: z.string().default('http://localhost:8000'),
+    /** Project name used when storing memories in AgentSynapse */
+    agentsynapse_project: z.string().default('swarm'),
+    /**
+     * Context % threshold that triggers the memory write.
+     * Accepts 80–95. Default 85. Set higher (90) on models with large context windows
+     * to avoid triggering too early; set lower (80) if you want more buffer before cutoff.
+     */
+    context_threshold: z.number().int().min(80).max(95).default(85),
+  }).default({}),
+
+  hub: z.object({
+    /** Port the hub server listens on (future — not yet running) */
+    port: z.number().int().default(7777),
+    /** Keep the hub process alive between CLI sessions */
+    persist: z.boolean().default(false),
+  }).default({}),
 })
 
 export type SwarmConfig = z.infer<typeof ConfigSchema>

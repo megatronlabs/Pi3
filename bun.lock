@@ -20,6 +20,7 @@
         "@swarm/bus": "workspace:*",
         "@swarm/config": "workspace:*",
         "@swarm/hermes": "workspace:*",
+        "@swarm/hub": "workspace:*",
         "@swarm/orchestrator": "workspace:*",
         "@swarm/providers": "workspace:*",
         "@swarm/telemetry": "workspace:*",
@@ -52,6 +53,13 @@
       "version": "0.1.0",
       "dependencies": {
         "zod": "^3.23.0",
+      },
+    },
+    "packages/hub": {
+      "name": "@swarm/hub",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.12",
       },
     },
     "packages/orchestrator": {
@@ -129,6 +137,8 @@
     "@swarm/config": ["@swarm/config@workspace:packages/config"],
 
     "@swarm/hermes": ["@swarm/hermes@workspace:packages/hermes"],
+
+    "@swarm/hub": ["@swarm/hub@workspace:packages/hub"],
 
     "@swarm/orchestrator": ["@swarm/orchestrator@workspace:packages/orchestrator"],
 

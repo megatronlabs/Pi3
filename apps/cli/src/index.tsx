@@ -14,6 +14,7 @@ import { MessageBus } from '@swarm/bus'
 import type { CommunicationMode } from '@swarm/bus'
 import { telemetry } from '@swarm/telemetry'
 import { SendAgentMessageTool, buildCommSystemPrompt } from '@swarm/orchestrator'
+import { createMemoryProvider, expandPath } from '@swarm/hub'
 
 const program = new Command()
   .name('swarm')
@@ -63,7 +64,20 @@ const program = new Command()
     // Wire telemetry to log every inter-agent message
     bus.monitor(msg => telemetry.logMessage(msg))
 
-    telemetry.logSession('start', sessionId, '', '')
+    // logSession called later once model/providerName are resolved
+
+    // -------------------------------------------------------------------------
+    // Memory provider
+    // -------------------------------------------------------------------------
+    const memoryProvider = createMemoryProvider({
+      backend:              config.memory.backend,
+      path:                 config.memory.path,
+      obsidian_vault:       config.memory.obsidian_vault || undefined,
+      agentsynapse_url:     config.memory.agentsynapse_url,
+      agentsynapse_project: config.memory.agentsynapse_project,
+    })
+    const contextThreshold = config.memory.context_threshold
+    const handoffDir = expandPath(config.memory.path)
 
     // Resolve active preset (CLI flag > config file > 'default')
     const activePreset = opts.preset ?? config.defaults.preset ?? 'default'
@@ -75,6 +89,7 @@ const program = new Command()
     // Apply config defaults for any flags not explicitly passed on CLI
     const providerName: string = opts.provider ?? chatRole.provider
     const model: string = opts.model ?? chatRole.model
+    telemetry.logSession('start', sessionId, model, providerName)
     const workingDir: string = opts.workingDir !== process.cwd()
       ? opts.workingDir
       : (config.defaults.working_dir ?? opts.workingDir)
@@ -194,6 +209,10 @@ const program = new Command()
         allRoles={allRoles}
         bus={bus}
         commMode={commMode}
+        memoryProvider={memoryProvider}
+        contextThreshold={contextThreshold}
+        handoffDir={handoffDir}
+        sessionId={sessionId}
       />,
       { exitOnCtrlC: true },
     )

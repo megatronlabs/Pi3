@@ -15,6 +15,7 @@ import type { RoleAssignment } from '@swarm/config'
 import { ROLE_NAMES, listPresets, BUILT_IN_PRESETS } from '@swarm/config'
 import type { RoleName } from '@swarm/config'
 import type { MessageBus, AgentMessage, CommunicationMode } from '@swarm/bus'
+import type { MemoryProvider, HandoffFiles } from '@swarm/hub'
 
 interface AppProps {
   agent: Agent
@@ -26,6 +27,10 @@ interface AppProps {
   allRoles?: Record<RoleName, RoleAssignment>
   bus?: MessageBus
   commMode?: CommunicationMode
+  memoryProvider?: MemoryProvider
+  contextThreshold?: number
+  handoffDir?: string
+  sessionId?: string
 }
 
 let _idCounter = 0
@@ -33,20 +38,18 @@ function nextId(): string {
   return `msg-${++_idCounter}`
 }
 
-const HANDOFF_THRESHOLD = 85
-
-function buildHandoffPrompt(pct: number): string {
+function buildHandoffPrompt(pct: number, handoffDir: string): string {
   return (
     `[SYSTEM] Context window is at ${pct}% capacity. ` +
     `Before this session ends, write a Handoff Transcript and Memory file so the next session can continue seamlessly.\n\n` +
     `Use the file_write tool to create both files:\n\n` +
-    `1. ~/.swarm/handoff/HANDOFF.md — Handoff Transcript:\n` +
+    `1. ${handoffDir}/HANDOFF.md — Handoff Transcript:\n` +
     `   - Summary of the current task and conversation\n` +
     `   - Key decisions made and why\n` +
     `   - Current state: what was accomplished, what's in progress\n` +
     `   - What needs to happen next (concrete next steps)\n` +
     `   - Any blockers or open questions\n\n` +
-    `2. ~/.swarm/handoff/MEMORY.md — Memory Dump:\n` +
+    `2. ${handoffDir}/MEMORY.md — Memory Dump:\n` +
     `   - Project context and goals\n` +
     `   - Important files and their roles\n` +
     `   - Architecture decisions and constraints\n` +
@@ -56,7 +59,7 @@ function buildHandoffPrompt(pct: number): string {
   )
 }
 
-export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode }: AppProps) {
+export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId }: AppProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [cost] = useState<number>(0)
@@ -129,7 +132,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
   useEffect(() => {
     if (
       contextPct === undefined ||
-      contextPct < HANDOFF_THRESHOLD ||
+      contextPct < contextThreshold ||
       handoffTriggeredRef.current ||
       isStreaming
     ) return
@@ -137,10 +140,10 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
     handoffTriggeredRef.current = true
 
     const pct = contextPct
+    const resolvedHandoffDir = handoffDir ?? join(homedir(), '.swarm', 'handoff')
     ;(async () => {
       // Ensure handoff directory exists
-      const handoffDir = join(homedir(), '.swarm', 'handoff')
-      await mkdir(handoffDir, { recursive: true })
+      await mkdir(resolvedHandoffDir, { recursive: true })
 
       // Show a system notice in the chat
       const noticeId = nextId()
@@ -158,7 +161,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
       assistantMsgIdRef.current = null
 
       try {
-        for await (const event of agent.run(buildHandoffPrompt(pct))) {
+        for await (const event of agent.run(buildHandoffPrompt(pct, resolvedHandoffDir))) {
           if (event.type === 'text') {
             setMessages(prev => {
               const existingId = assistantMsgIdRef.current
@@ -213,6 +216,20 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
           } else if (event.type === 'done' || event.type === 'error') {
             setIsStreaming(false)
             assistantMsgIdRef.current = null
+
+            // Notify the memory provider that files have been written
+            if (event.type === 'done' && memoryProvider) {
+              const files: HandoffFiles = {
+                transcriptPath: join(resolvedHandoffDir, 'HANDOFF.md'),
+                memoryPath:     join(resolvedHandoffDir, 'MEMORY.md'),
+                timestamp:      new Date(),
+                sessionId:      sessionId ?? agent.sessionId,
+                contextPct:     pct,
+              }
+              memoryProvider.onHandoffComplete(files).catch(() => {
+                // Never crash the app for memory sync failures
+              })
+            }
           }
         }
       } catch {
@@ -220,7 +237,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         assistantMsgIdRef.current = null
       }
     })()
-  }, [contextPct, isStreaming, agent])
+  }, [contextPct, contextThreshold, isStreaming, agent, memoryProvider, handoffDir, sessionId])
 
   // Ctrl+W toggles AgentPanel · Ctrl+L toggles CommLog
   useInput((input: string, key: Key) => {

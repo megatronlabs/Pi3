@@ -14,6 +14,7 @@
   "dependencies": {
     "@swarm/bus": "workspace:*",
     "@swarm/config": "workspace:*",
+    "@swarm/hub": "workspace:*",
     "@swarm/hermes": "workspace:*",
     "@swarm/orchestrator": "workspace:*",
     "@swarm/providers": "workspace:*",
