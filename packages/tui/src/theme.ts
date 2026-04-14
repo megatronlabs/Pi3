@@ -165,5 +165,8 @@ export function ThemeProvider({
   theme?: Theme
   children: React.ReactNode
 }): React.JSX.Element {
-  return React.createElement(ThemeContext.Provider, { value: theme }, children)
+  // Spread into a new object every render so React always sees a changed
+  // context value and re-renders all useTheme() consumers.
+  const value = React.useMemo(() => ({ ...theme }), [theme])
+  return React.createElement(ThemeContext.Provider, { value }, children)
 }
