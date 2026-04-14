@@ -1,6 +1,6 @@
 // Theme
-export { darkTheme, ThemeContext, ThemeProvider, useTheme } from './theme.js'
-export type { Theme } from './theme.js'
+export { darkTheme, lightTheme, draculaTheme, catppuccinTheme, nordTheme, gruvboxTheme, THEMES, getTheme, applyThemeOverrides, ThemeContext, ThemeProvider, useTheme } from './theme.js'
+export type { Theme, BorderStyle } from './theme.js'
 
 // Types
 export type { MessageRole, MessageContent, ChatMessage, AgentInfo } from './types.js'

@@ -2,6 +2,7 @@ import { Agent } from './Agent.js'
 import type { AgentConfig } from './Agent.js'
 import type { AgentTool } from './AgentTool.js'
 import type { Provider } from '@swarm/providers'
+import type { MessageBus, AgentRegistry } from '@swarm/bus'
 
 export interface WorkerConfig {
   id: string
@@ -11,6 +12,8 @@ export interface WorkerConfig {
   tools?: AgentTool[]
   systemPrompt?: string
   workingDir?: string
+  bus?: MessageBus
+  registry?: AgentRegistry
 }
 
 export interface Worker {
@@ -32,6 +35,8 @@ export class WorkerPool {
       tools: config.tools,
       systemPrompt: config.systemPrompt,
       workingDir: config.workingDir,
+      bus: config.bus,
+      registry: config.registry,
     }
 
     const agent = new Agent(agentConfig)

@@ -155,6 +155,14 @@ export class Agent {
     this.engine.compact(keepLast)
   }
 
+  /**
+   * Append extra tools for the next turn(s). Returns a cleanup function
+   * that removes those exact tools from the engine when called.
+   */
+  appendTools(tools: AgentTool[]): () => void {
+    return this.engine.appendTools(tools)
+  }
+
   /** Hot-swap the provider and model mid-session. */
   swapProvider(provider: Provider, model: string): void {
     this.engine.swapProvider(provider, model)

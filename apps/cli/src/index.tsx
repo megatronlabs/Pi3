@@ -3,7 +3,7 @@ import React from 'react'
 import { render } from 'ink'
 import { Command } from 'commander'
 import { providerRegistry, AnthropicProvider, OpenRouterProvider, OllamaProvider, ReplicateProvider } from '@swarm/providers'
-import { Agent, SwarmAgentTool } from '@swarm/orchestrator'
+import { Agent, SwarmAgentTool, WorkerPool } from '@swarm/orchestrator'
 import { defaultTools } from '@swarm/tools'
 import { loadConfig, initConfig, resolveProviderKey, resolveBaseUrl, CONFIG_PATH, resolveRole, resolveAllRoles, listPresets } from '@swarm/config'
 import { App } from './App'
@@ -44,18 +44,37 @@ const program = new Command()
 
     // -------------------------------------------------------------------------
     // Hub server (optional — only when config.hub.persist = true)
+    //
+    // The hub runs as a detached background process that outlives the CLI.
+    // On each CLI startup we:
+    //   1. Health-check the hub — if it's already up, reuse it
+    //   2. If not running, spawn a new detached hub process
+    //   3. Poll /health until ready (up to ~3 s), then wire it in
     // -------------------------------------------------------------------------
     let hubBaseUrl: string | undefined
     if (config.hub.persist) {
+      const hubUrl = `http://localhost:${config.hub.port}`
+      const isAlive = async (): Promise<boolean> =>
+        fetch(`${hubUrl}/health`).then(r => r.ok).catch(() => false)
+
       try {
-        const { HubServer } = await import('@swarm/hub')
-        const hubServer = new HubServer({
-          port: config.hub.port,
-          dataDir: expandPath('~/.swarm/hub'),
-        })
-        await hubServer.start()
-        hubBaseUrl = `http://localhost:${config.hub.port}`
-        process.on('exit', () => { hubServer.stop().catch(() => {}) })
+        if (await isAlive()) {
+          // Already running from a previous session
+          hubBaseUrl = hubUrl
+        } else {
+          const { spawnHubDaemon } = await import('@swarm/hub')
+          await spawnHubDaemon(config.hub.port, expandPath('~/.swarm/hub'))
+
+          // Poll until the hub is ready (max ~3 s)
+          for (let i = 0; i < 15; i++) {
+            await Bun.sleep(200)
+            if (await isAlive()) { hubBaseUrl = hubUrl; break }
+          }
+
+          if (!hubBaseUrl) {
+            process.stderr.write('[swarm] Hub did not become ready in time — continuing without it\n')
+          }
+        }
       } catch (err) {
         process.stderr.write(`[swarm] Hub failed to start: ${err}\n`)
       }

@@ -2,8 +2,8 @@ import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { useInput, type Key } from 'ink'
 import { ThemeProvider, FullscreenLayout, getTheme, THEMES, darkTheme } from '@swarm/tui'
 import type { ChatMessage, MessageContent, AgentWorkerStatus, TaskSummary, Theme } from '@swarm/tui'
-import type { Agent, AgentTool } from '@swarm/orchestrator'
-import { Coordinator } from '@swarm/orchestrator'
+import type { Agent, AgentTool, WorkerPool } from '@swarm/orchestrator'
+import { Coordinator, SwarmAddTaskTool, SwarmRunTool, TaskGraph } from '@swarm/orchestrator'
 import type { CoordinatorEvent } from '@swarm/orchestrator'
 import type { SlashCommand } from '@swarm/tui'
 import { getContextWindow } from '@swarm/providers'
@@ -34,6 +34,8 @@ interface AppProps {
   theme?: Theme
   providers?: Array<{ id: string; name: string; models: string[] }>
   onModelSwap?: (provider: string, model: string) => void
+  swarmMode?: boolean
+  workerFactory?: (count: number) => WorkerPool
 }
 
 let _idCounter = 0
@@ -62,7 +64,7 @@ function buildHandoffPrompt(pct: number, handoffDir: string): string {
   )
 }
 
-export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId, theme, providers, onModelSwap }: AppProps) {
+export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId, theme, providers, onModelSwap, swarmMode = false, workerFactory }: AppProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [activeTheme, setActiveTheme] = useState<Theme>(theme ?? darkTheme)
   const [isStreaming, setIsStreaming] = useState(false)
@@ -80,6 +82,8 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
   const assistantMsgIdRef = useRef<string | null>(null)
   // Prevent firing handoff more than once per session
   const handoffTriggeredRef = useRef(false)
+  // Pending task graph for swarm planning turns
+  const pendingGraphRef = useRef<TaskGraph | null>(null)
 
   const contextWindow = getContextWindow(agent.model)
   const contextPct = contextTokens > 0
@@ -257,6 +261,129 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
     }
   })
 
+  // ── Streaming helper ────────────────────────────────────────────────────────
+  // Drains a TurnEvent async iterable into the messages state.
+  // Returns a promise that resolves when the turn is done or errors.
+  async function drainAgentRun(iterable: AsyncIterable<import('@swarm/orchestrator').TurnEvent>): Promise<void> {
+    for await (const event of iterable) {
+      if (event.type === 'text') {
+        setMessages(prev => {
+          const existingId = assistantMsgIdRef.current
+          if (existingId) {
+            return prev.map(msg => {
+              if (msg.id !== existingId) return msg
+              const newContent = msg.content.map(block => {
+                if (block.kind === 'text') {
+                  return { ...block, text: block.text + event.delta } as MessageContent
+                }
+                return block
+              })
+              return { ...msg, content: newContent }
+            })
+          } else {
+            const newId = nextId()
+            assistantMsgIdRef.current = newId
+            const newMsg: ChatMessage = {
+              id: newId,
+              role: 'assistant',
+              content: [{ kind: 'text', text: event.delta }],
+              timestamp: new Date(),
+            }
+            return [...prev, newMsg]
+          }
+        })
+      } else if (event.type === 'thinking') {
+        setMessages(prev => {
+          const existingId = assistantMsgIdRef.current
+          if (existingId) {
+            return prev.map(msg => {
+              if (msg.id !== existingId) return msg
+              const thinkingBlock = msg.content.find(b => b.kind === 'thinking')
+              if (thinkingBlock) {
+                return {
+                  ...msg,
+                  content: msg.content.map(b =>
+                    b.kind === 'thinking'
+                      ? ({ ...b, text: b.text + event.delta } as MessageContent)
+                      : b,
+                  ),
+                }
+              }
+              return {
+                ...msg,
+                content: [...msg.content, { kind: 'thinking', text: event.delta } as MessageContent],
+              }
+            })
+          } else {
+            const newId = nextId()
+            assistantMsgIdRef.current = newId
+            const newMsg: ChatMessage = {
+              id: newId,
+              role: 'assistant',
+              content: [{ kind: 'thinking', text: event.delta }],
+              timestamp: new Date(),
+            }
+            return [...prev, newMsg]
+          }
+        })
+      } else if (event.type === 'tool_start') {
+        const toolMsgId = nextId()
+        const toolMsg: ChatMessage = {
+          id: toolMsgId,
+          role: 'assistant',
+          content: [
+            {
+              kind: 'tool_use',
+              id: event.toolCallId,
+              name: event.toolName,
+              input: event.toolInput,
+              status: 'running',
+            } as MessageContent,
+          ],
+          timestamp: new Date(),
+        }
+        setMessages(prev => [...prev, toolMsg])
+        assistantMsgIdRef.current = null
+      } else if (event.type === 'tool_done') {
+        setMessages(prev =>
+          prev.map(msg => {
+            const hasBlock = msg.content.some(
+              b => b.kind === 'tool_use' && b.id === event.toolCallId,
+            )
+            if (!hasBlock) return msg
+            return {
+              ...msg,
+              content: msg.content.map(b => {
+                if (b.kind === 'tool_use' && b.id === event.toolCallId) {
+                  return {
+                    ...b,
+                    status: event.toolError ? 'error' : 'done',
+                  } as MessageContent
+                }
+                return b
+              }),
+            }
+          }),
+        )
+      } else if (event.type === 'usage') {
+        setContextTokens(event.inputTokens)
+      } else if (event.type === 'done') {
+        setIsStreaming(false)
+        assistantMsgIdRef.current = null
+      } else if (event.type === 'error') {
+        const errorMsg: ChatMessage = {
+          id: nextId(),
+          role: 'assistant',
+          content: [{ kind: 'error', message: event.message }],
+          timestamp: new Date(),
+        }
+        setMessages(prev => [...prev, errorMsg])
+        setIsStreaming(false)
+        assistantMsgIdRef.current = null
+      }
+    }
+  }
+
   const onSubmit = useCallback(
     (text: string) => {
       if (isStreaming) return
@@ -299,145 +426,77 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
       setIsStreaming(true)
       assistantMsgIdRef.current = null
 
-      // Run the agent loop in the background
-      ;(async () => {
-        try {
-          for await (const event of agent.run(text)) {
-            if (event.type === 'text') {
-              setMessages(prev => {
-                const existingId = assistantMsgIdRef.current
-                if (existingId) {
-                  // Append delta to existing assistant text block
-                  return prev.map(msg => {
-                    if (msg.id !== existingId) return msg
-                    const newContent = msg.content.map(block => {
-                      if (block.kind === 'text') {
-                        return { ...block, text: block.text + event.delta } as MessageContent
-                      }
-                      return block
-                    })
-                    return { ...msg, content: newContent }
-                  })
-                } else {
-                  // Create a new assistant message
-                  const newId = nextId()
-                  assistantMsgIdRef.current = newId
-                  const newMsg: ChatMessage = {
-                    id: newId,
-                    role: 'assistant',
-                    content: [{ kind: 'text', text: event.delta }],
-                    timestamp: new Date(),
-                  }
-                  return [...prev, newMsg]
-                }
-              })
-            } else if (event.type === 'thinking') {
-              setMessages(prev => {
-                const existingId = assistantMsgIdRef.current
-                if (existingId) {
-                  // Append to existing thinking block or add one
-                  return prev.map(msg => {
-                    if (msg.id !== existingId) return msg
-                    const thinkingBlock = msg.content.find(b => b.kind === 'thinking')
-                    if (thinkingBlock) {
-                      return {
-                        ...msg,
-                        content: msg.content.map(b =>
-                          b.kind === 'thinking'
-                            ? ({ ...b, text: b.text + event.delta } as MessageContent)
-                            : b,
-                        ),
-                      }
-                    }
-                    return {
-                      ...msg,
-                      content: [...msg.content, { kind: 'thinking', text: event.delta } as MessageContent],
-                    }
-                  })
-                } else {
-                  const newId = nextId()
-                  assistantMsgIdRef.current = newId
-                  const newMsg: ChatMessage = {
-                    id: newId,
-                    role: 'assistant',
-                    content: [{ kind: 'thinking', text: event.delta }],
-                    timestamp: new Date(),
-                  }
-                  return [...prev, newMsg]
-                }
-              })
-            } else if (event.type === 'tool_start') {
-              const toolMsgId = nextId()
-              const toolMsg: ChatMessage = {
-                id: toolMsgId,
-                role: 'assistant',
-                content: [
-                  {
-                    kind: 'tool_use',
-                    id: event.toolCallId,
-                    name: event.toolName,
-                    input: event.toolInput,
-                    status: 'running',
-                  } as MessageContent,
-                ],
-                timestamp: new Date(),
-              }
-              setMessages(prev => [...prev, toolMsg])
-              // Next text event should go into a new assistant message
-              assistantMsgIdRef.current = null
-            } else if (event.type === 'tool_done') {
-              setMessages(prev =>
-                prev.map(msg => {
-                  const hasBlock = msg.content.some(
-                    b => b.kind === 'tool_use' && b.id === event.toolCallId,
-                  )
-                  if (!hasBlock) return msg
-                  return {
-                    ...msg,
-                    content: msg.content.map(b => {
-                      if (b.kind === 'tool_use' && b.id === event.toolCallId) {
-                        return {
-                          ...b,
-                          status: event.toolError ? 'error' : 'done',
-                        } as MessageContent
-                      }
-                      return b
-                    }),
-                  }
-                }),
-              )
-            } else if (event.type === 'usage') {
-              setContextTokens(event.inputTokens)
-            } else if (event.type === 'done') {
-              setIsStreaming(false)
-              assistantMsgIdRef.current = null
-            } else if (event.type === 'error') {
-              const errorMsg: ChatMessage = {
+      if (swarmMode && workerFactory) {
+        // ── Swarm planning path ──────────────────────────────────────────────
+        ;(async () => {
+          const graph = new TaskGraph()
+          pendingGraphRef.current = graph
+
+          const addTaskTool = new SwarmAddTaskTool(graph)
+          const runTool = new SwarmRunTool(() => {
+            const g = pendingGraphRef.current
+            if (!g) return
+            const count = g.getAllTasks().length
+            if (count === 0) return
+            const pool = workerFactory(count)
+            const coord = new Coordinator(g, pool)
+            setCoordinator(coord)
+            const workerCount = Math.min(count, 4)
+            setMessages(prev => [...prev, {
+              id: nextId(),
+              role: 'assistant',
+              content: [{ kind: 'text', text: `Swarm running: ${count} task${count !== 1 ? 's' : ''} across ${workerCount} worker${workerCount !== 1 ? 's' : ''}` }],
+              timestamp: new Date(),
+            }])
+            coord.run().catch(err => {
+              const message = err instanceof Error ? err.message : String(err)
+              setMessages(prev => [...prev, {
                 id: nextId(),
                 role: 'assistant',
-                content: [{ kind: 'error', message: event.message }],
+                content: [{ kind: 'error', message }],
                 timestamp: new Date(),
-              }
-              setMessages(prev => [...prev, errorMsg])
-              setIsStreaming(false)
-              assistantMsgIdRef.current = null
+              }])
+            })
+          })
+
+          const removeTools = agent.appendTools([addTaskTool, runTool])
+          try {
+            await drainAgentRun(agent.run(text))
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err)
+            setMessages(prev => [...prev, {
+              id: nextId(),
+              role: 'assistant',
+              content: [{ kind: 'error', message }],
+              timestamp: new Date(),
+            }])
+            setIsStreaming(false)
+            assistantMsgIdRef.current = null
+          } finally {
+            removeTools()
+          }
+        })()
+      } else {
+        // ── Normal path ──────────────────────────────────────────────────────
+        ;(async () => {
+          try {
+            await drainAgentRun(agent.run(text))
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err)
+            const errorMsg: ChatMessage = {
+              id: nextId(),
+              role: 'assistant',
+              content: [{ kind: 'error', message }],
+              timestamp: new Date(),
             }
+            setMessages(prev => [...prev, errorMsg])
+            setIsStreaming(false)
+            assistantMsgIdRef.current = null
           }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err)
-          const errorMsg: ChatMessage = {
-            id: nextId(),
-            role: 'assistant',
-            content: [{ kind: 'error', message }],
-            timestamp: new Date(),
-          }
-          setMessages(prev => [...prev, errorMsg])
-          setIsStreaming(false)
-          assistantMsgIdRef.current = null
-        }
-      })()
+        })()
+      }
     },
-    [agent, isStreaming],
+    [agent, isStreaming, swarmMode, workerFactory],
   )
 
   const onCommand = useCallback((command: SlashCommand) => {

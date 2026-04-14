@@ -2,6 +2,7 @@ import { expandPath } from './MemoryProvider.js'
 import { MarkdownMemoryProvider } from './MarkdownMemoryProvider.js'
 import { ObsidianMemoryProvider } from './ObsidianMemoryProvider.js'
 import { AgentSynapseProvider } from './AgentSynapseProvider.js'
+import { HubMemoryProvider } from '../HubMemoryProvider.js'
 import type { MemoryProvider, MemoryBackend } from './MemoryProvider.js'
 
 export interface MemoryConfig {
@@ -35,6 +36,11 @@ export function createMemoryProvider(cfg: MemoryConfig): MemoryProvider {
     }
 
     case 'agentsynapse':
+      return new HubMemoryProvider(
+        cfg.agentsynapse_url ?? 'http://localhost:7777',
+        cfg.agentsynapse_project ?? 'swarm',
+      )
+
     case 'agentcognose':
       return new AgentSynapseProvider(
         cfg.agentsynapse_url ?? 'http://localhost:8000',

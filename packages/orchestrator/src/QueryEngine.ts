@@ -172,6 +172,18 @@ export class QueryEngine {
   }
 
   /**
+   * Append extra tools for subsequent turns. Returns a cleanup function
+   * that removes exactly the tools that were appended.
+   */
+  appendTools(tools: AgentTool[]): () => void {
+    this.options.tools = [...(this.options.tools ?? []), ...tools]
+    return () => {
+      const appended = new Set(tools.map(t => t.name))
+      this.options.tools = (this.options.tools ?? []).filter(t => !appended.has(t.name))
+    }
+  }
+
+  /**
    * Compact history by keeping only the last `keepLast` messages.
    * Older messages are discarded. Defaults to 20.
    */

@@ -44,10 +44,28 @@ export const ConfigSchema = z.object({
   defaults: z.object({
     model: z.string().default('claude-opus-4-6'),
     provider: z.string().default('anthropic'),
-    theme: z.enum(['dark']).default('dark'),
+    theme: z.enum(['dark', 'light', 'dracula', 'catppuccin', 'nord', 'gruvbox']).default('dark'),
     working_dir: z.string().optional(),
     /** Active preset name — 'default' means use [roles] section directly */
     preset: z.string().default('default'),
+  }).default({}),
+
+  /** Per-color theme overrides — applied on top of the named theme */
+  theme: z.object({
+    border_style: z.enum(['single', 'double', 'round', 'bold', 'classic']).optional(),
+    primary: z.string().optional(),
+    secondary: z.string().optional(),
+    muted: z.string().optional(),
+    accent: z.string().optional(),
+    error: z.string().optional(),
+    warning: z.string().optional(),
+    success: z.string().optional(),
+    user: z.string().optional(),
+    assistant: z.string().optional(),
+    tool: z.string().optional(),
+    thinking: z.string().optional(),
+    border: z.string().optional(),
+    input_border: z.string().optional(),
   }).default({}),
 
   /** Direct role overrides — used when preset is 'default' */

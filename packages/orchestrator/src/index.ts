@@ -12,6 +12,7 @@ export { Coordinator } from './Coordinator.js'
 export type { CoordinatorEvent } from './Coordinator.js'
 export { SwarmAgentTool } from './SwarmAgentTool.js'
 export type { SwarmAgentInput } from './SwarmAgentTool.js'
+export { SwarmAddTaskTool, SwarmRunTool } from './SwarmPlannerTools.js'
 export { SendAgentMessageTool, buildCommSystemPrompt } from './SendAgentMessageTool.js'
 export type { SendAgentMessageInput } from './SendAgentMessageTool.js'
 // Re-export bus types for convenience

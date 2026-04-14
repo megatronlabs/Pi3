@@ -122,7 +122,7 @@ export function PromptInput({
 
       <Box
         flexDirection="row"
-        borderStyle="single"
+        borderStyle={theme.borderStyle}
         borderColor={menuOpen ? theme.accent : theme.inputBorder}
         paddingX={1}
       >

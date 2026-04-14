@@ -25,6 +25,7 @@ export const BUILT_IN_COMMANDS: SlashCommand[] = [
   { type: 'action', name: 'mcp',             description: 'Show MCP server status' },
   { type: 'action', name: 'model',           description: 'Switch provider and model' },
   { type: 'action', name: 'status',          description: 'Show session status (context, tokens, history)' },
+  { type: 'action', name: 'theme',           description: 'Switch UI theme (dark / light / dracula / catppuccin / nord / gruvbox)' },
   { type: 'action', name: 'training-wheels', description: 'Show training wheels status' },
 ]
 
