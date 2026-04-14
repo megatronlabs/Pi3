@@ -24,6 +24,7 @@ export const BUILT_IN_COMMANDS: SlashCommand[] = [
   { type: 'action', name: 'help',            description: 'Show available commands and keybindings' },
   { type: 'action', name: 'mcp',             description: 'Show MCP server status' },
   { type: 'action', name: 'model',           description: 'Switch provider and model' },
+  { type: 'action', name: 'skills',          description: 'List available skills' },
   { type: 'action', name: 'status',          description: 'Show session status (context, tokens, history)' },
   { type: 'action', name: 'theme',           description: 'Switch UI theme (dark / light / dracula / catppuccin / nord / gruvbox)' },
   { type: 'action', name: 'training-wheels', description: 'Show training wheels status' },
@@ -32,4 +33,14 @@ export const BUILT_IN_COMMANDS: SlashCommand[] = [
 export function filterCommands(query: string): SlashCommand[] {
   const q = query.toLowerCase()
   return BUILT_IN_COMMANDS.filter(c => c.name.startsWith(q))
+}
+
+export function makeSkillCommand(skill: { name: string; description: string }): ActionCommand {
+  return { type: 'action', name: skill.name, description: skill.description }
+}
+
+export function filterCommandsWithSkills(query: string, skills: ActionCommand[]): SlashCommand[] {
+  const q = query.toLowerCase()
+  const all: SlashCommand[] = [...BUILT_IN_COMMANDS, ...skills]
+  return all.filter(c => c.name.startsWith(q))
 }

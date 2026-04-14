@@ -9,7 +9,7 @@ import { AgentPanel } from './AgentPanel.js'
 import { CommLog } from './CommLog.js'
 import type { ChatMessage } from './types.js'
 import type { AgentWorkerStatus, TaskSummary } from './AgentPanel.js'
-import type { SlashCommand } from './commands.js'
+import type { SlashCommand, ActionCommand } from './commands.js'
 import type { AgentMessage, CommunicationMode } from '@swarm/bus'
 
 export interface FullscreenLayoutProps {
@@ -25,6 +25,7 @@ export interface FullscreenLayoutProps {
   contextPct?: number
   trainingWheels?: boolean
   onCommand?: (command: SlashCommand) => void
+  extraCommands?: ActionCommand[]
   // Picker overlay
   showPicker?: boolean
   pickerProviders?: Array<{ id: string; name: string; models: string[] }>
@@ -57,6 +58,7 @@ export function FullscreenLayout({
   contextPct,
   trainingWheels = false,
   onCommand,
+  extraCommands = [],
   showPicker = false,
   pickerProviders,
   onPickerSelect,
@@ -108,6 +110,7 @@ export function FullscreenLayout({
         onCommand={onCommand}
         disabled={disabled || showPicker}
         placeholder="Type a message..."
+        extraCommands={extraCommands}
       />
       <StatusLine
         appName={appName}

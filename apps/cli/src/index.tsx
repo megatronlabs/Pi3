@@ -16,7 +16,8 @@ import { MessageBus, AgentRegistry } from '@swarm/bus'
 import type { CommunicationMode } from '@swarm/bus'
 import { telemetry } from '@swarm/telemetry'
 import { SendAgentMessageTool, buildCommSystemPrompt } from '@swarm/orchestrator'
-import { createMemoryProvider, expandPath } from '@swarm/hub'
+import { createMemoryProvider, expandPath, SkillStore, CreateSkillTool } from '@swarm/hub'
+import type { Skill } from '@swarm/hub'
 import { McpManager } from '@swarm/mcp'
 import type { McpServerInfo } from '@swarm/mcp'
 
@@ -129,6 +130,10 @@ const program = new Command()
     })
     const contextThreshold = config.memory.context_threshold
     const handoffDir = expandPath(config.memory.path)
+
+    // Skills store — loads persisted slash-command skills from ~/.swarm/skills/
+    const skillStore = new SkillStore(expandPath('~/.swarm/skills'))
+    const skills = await skillStore.load()
 
     // Resolve active preset (CLI flag > config file > 'default')
     const activePreset = opts.preset ?? config.defaults.preset ?? 'default'
@@ -304,6 +309,8 @@ const program = new Command()
         sessionId={sessionId}
         theme={theme}
         providers={KNOWN_PROVIDERS}
+        skills={skills}
+        skillStore={skillStore}
         onModelSwap={(providerId, model) => {
           let newProvider: Provider
           switch (providerId) {

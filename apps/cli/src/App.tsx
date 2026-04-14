@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react'
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useInput, type Key } from 'ink'
-import { ThemeProvider, FullscreenLayout, getTheme, THEMES, darkTheme } from '@swarm/tui'
-import type { ChatMessage, MessageContent, AgentWorkerStatus, TaskSummary, Theme } from '@swarm/tui'
+import { ThemeProvider, FullscreenLayout, getTheme, THEMES, darkTheme, makeSkillCommand } from '@swarm/tui'
+import type { ChatMessage, MessageContent, AgentWorkerStatus, TaskSummary, Theme, ActionCommand } from '@swarm/tui'
 import type { Agent, AgentTool, WorkerPool } from '@swarm/orchestrator'
 import { Coordinator, SwarmAddTaskTool, SwarmRunTool, TaskGraph } from '@swarm/orchestrator'
 import type { CoordinatorEvent } from '@swarm/orchestrator'
@@ -15,7 +15,8 @@ import type { RoleAssignment } from '@swarm/config'
 import { ROLE_NAMES, listPresets, BUILT_IN_PRESETS } from '@swarm/config'
 import type { RoleName } from '@swarm/config'
 import type { MessageBus, AgentMessage, CommunicationMode } from '@swarm/bus'
-import type { MemoryProvider, HandoffFiles } from '@swarm/hub'
+import type { MemoryProvider, HandoffFiles, Skill, SkillStore } from '@swarm/hub'
+import { CreateSkillTool } from '@swarm/hub'
 
 interface AppProps {
   agent: Agent
@@ -37,6 +38,8 @@ interface AppProps {
   swarmMode?: boolean
   workerFactory?: (count: number) => WorkerPool
   mcpStatus?: import('@swarm/mcp').McpServerInfo[]
+  skills?: Skill[]
+  skillStore?: SkillStore
 }
 
 let _idCounter = 0
@@ -65,7 +68,7 @@ function buildHandoffPrompt(pct: number, handoffDir: string): string {
   )
 }
 
-export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId, theme, providers, onModelSwap, swarmMode = false, workerFactory, mcpStatus }: AppProps) {
+export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId, theme, providers, onModelSwap, swarmMode = false, workerFactory, mcpStatus, skills, skillStore }: AppProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [activeTheme, setActiveTheme] = useState<Theme>(theme ?? darkTheme)
   const [isStreaming, setIsStreaming] = useState(false)
@@ -78,6 +81,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
   const [commLog, setCommLog] = useState<AgentMessage[]>([])
   const [showCommLog, setShowCommLog] = useState(false)
   const [showModelPicker, setShowModelPicker] = useState(false)
+  const [dynamicSkills, setDynamicSkills] = useState<Skill[]>(skills ?? [])
 
   // Track the current assistant message id across streaming events
   const assistantMsgIdRef = useRef<string | null>(null)
@@ -85,6 +89,22 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
   const handoffTriggeredRef = useRef(false)
   // Pending task graph for swarm planning turns
   const pendingGraphRef = useRef<TaskGraph | null>(null)
+  // Always-current snapshot of dynamic skills (for use inside stable callbacks)
+  const dynamicSkillsRef = useRef<Skill[]>(dynamicSkills)
+  useEffect(() => { dynamicSkillsRef.current = dynamicSkills }, [dynamicSkills])
+
+  // Append CreateSkillTool to the agent so the agent can define new skills
+  useEffect(() => {
+    if (!skillStore) return
+    const tool = new CreateSkillTool(skillStore, (skill: Skill) => {
+      setDynamicSkills(prev => {
+        const without = prev.filter(s => s.name !== skill.name)
+        return [...without, skill]
+      })
+    })
+    const remove = agent.appendTools([tool as unknown as import('@swarm/orchestrator').AgentTool])
+    return remove
+  }, [agent, skillStore])
 
   const contextWindow = getContextWindow(agent.model)
   const contextPct = contextTokens > 0
@@ -626,6 +646,17 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         break
       }
 
+      case 'skills': {
+        const currentSkills = dynamicSkillsRef.current
+        if (currentSkills.length === 0) {
+          setMessages(prev => [...prev, systemMsg('No skills saved yet. Ask the agent to create one with create_skill.')])
+        } else {
+          const lines = currentSkills.map(s => `  /${s.name.padEnd(20)} ${s.description}`).join('\n')
+          setMessages(prev => [...prev, systemMsg(`Skills (${currentSkills.length})\n${lines}`)])
+        }
+        break
+      }
+
       case 'training-wheels':
         setMessages(prev => [...prev, systemMsg(
           trainingWheels
@@ -633,8 +664,23 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
             : `Training wheels: OFF\n  Start with --training-wheels to enable.`
         )])
         break
+
+      default: {
+        // Check if the command matches a dynamic skill
+        const matchedSkill = dynamicSkillsRef.current.find(s => s.name === command.name)
+        if (matchedSkill) {
+          onSubmit(matchedSkill.prompt)
+        }
+        break
+      }
     }
-  }, [agent, workingDir, contextPct, contextWindow, trainingWheels, activeTheme])
+  }, [agent, workingDir, contextPct, contextWindow, trainingWheels, activeTheme, onSubmit])
+
+  // Derive ActionCommand[] for the slash menu from current dynamic skills
+  const skillCommands = useMemo<ActionCommand[]>(
+    () => dynamicSkills.map(s => makeSkillCommand(s)),
+    [dynamicSkills],
+  )
 
   function handlePickerSelect(providerId: string, model: string): void {
     setShowModelPicker(false)
@@ -653,6 +699,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         messages={messages}
         onSubmit={onSubmit}
         onCommand={onCommand}
+        extraCommands={skillCommands}
         appName="Pi3"
         model={agent.model}
         provider={agent.providerId}

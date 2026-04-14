@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { useTheme } from './theme.js'
 import { SlashMenu } from './SlashMenu.js'
-import { filterCommands } from './commands.js'
-import type { SlashCommand } from './commands.js'
+import { filterCommandsWithSkills } from './commands.js'
+import type { SlashCommand, ActionCommand } from './commands.js'
 
 interface PromptInputProps {
   onSubmit: (value: string) => void
@@ -11,6 +11,7 @@ interface PromptInputProps {
   onCancel?: () => void
   disabled?: boolean
   placeholder?: string
+  extraCommands?: ActionCommand[]
 }
 
 export function PromptInput({
@@ -19,6 +20,7 @@ export function PromptInput({
   onCancel,
   disabled = false,
   placeholder = 'Type a message...',
+  extraCommands = [],
 }: PromptInputProps): React.JSX.Element {
   const theme = useTheme()
   const [value, setValue] = useState('')
@@ -36,7 +38,7 @@ export function PromptInput({
 
   // Slash menu state — active when value starts with '/'
   const slashQuery = value.startsWith('/') ? value.slice(1) : null
-  const menuCommands = slashQuery !== null ? filterCommands(slashQuery) : []
+  const menuCommands = slashQuery !== null ? filterCommandsWithSkills(slashQuery, extraCommands) : []
   const menuOpen = menuCommands.length > 0
 
   // Reset selection when the list changes
