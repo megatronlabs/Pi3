@@ -10,6 +10,10 @@ import { App } from './App'
 import { adaptTools } from './adaptTool'
 import { wrapWithTrainingWheels } from './trainingWheels'
 import type { Provider } from '@swarm/providers'
+import { MessageBus } from '@swarm/bus'
+import type { CommunicationMode } from '@swarm/bus'
+import { telemetry } from '@swarm/telemetry'
+import { SendAgentMessageTool, buildCommSystemPrompt } from '@swarm/orchestrator'
 
 const program = new Command()
   .name('swarm')
@@ -22,7 +26,9 @@ const program = new Command()
   .option('-s, --swarm', 'Enable swarm mode (agent can spawn sub-agents via spawn_agent tool)')
   .option('--training-wheels', 'Restrict agent to read-only within working directory; writes require user approval')
   .option('--preset <preset>', 'Model preset to use: quality | fast | local | mixed | default')
-  .action(async (opts: { model?: string; provider?: string; workingDir: string; initConfig?: boolean; swarm?: boolean; trainingWheels?: boolean; preset?: string }) => {
+  .option('--comm-mode <mode>', 'Inter-agent comm mode: orchestrated | choreographed | adhoc')
+  .option('--comm-format <format>', 'Message format: hermes | english (default: hermes)')
+  .action(async (opts: { model?: string; provider?: string; workingDir: string; initConfig?: boolean; swarm?: boolean; trainingWheels?: boolean; preset?: string; commMode?: string; commFormat?: string }) => {
     // Handle --init-config flag
     if (opts.initConfig) {
       await initConfig()
@@ -32,6 +38,32 @@ const program = new Command()
 
     // Load config (returns defaults if file doesn't exist)
     const config = await loadConfig()
+
+    // -------------------------------------------------------------------------
+    // Telemetry
+    // -------------------------------------------------------------------------
+    telemetry.init({
+      enabled: config.telemetry.enabled,
+      otlpEndpoint: config.telemetry.otlp_endpoint || undefined,
+      logFile: config.telemetry.log_file,
+      logLevel: config.telemetry.log_level,
+    })
+
+    // -------------------------------------------------------------------------
+    // Communication bus
+    // -------------------------------------------------------------------------
+    const commMode = (opts.commMode ?? config.communication.mode) as CommunicationMode
+    const commFormat = (opts.commFormat ?? config.communication.format) as 'hermes' | 'english'
+    const sessionId = `session-${Date.now()}`
+
+    // Bus is always created so the CommLog panel works; it's just empty until
+    // agents start sending messages.
+    const bus = new MessageBus()
+
+    // Wire telemetry to log every inter-agent message
+    bus.monitor(msg => telemetry.logMessage(msg))
+
+    telemetry.logSession('start', sessionId, '', '')
 
     // Resolve active preset (CLI flag > config file > 'default')
     const activePreset = opts.preset ?? config.defaults.preset ?? 'default'
@@ -112,6 +144,14 @@ const program = new Command()
         })
       : adaptedTools
 
+    // SendAgentMessageTool — always available so agents can communicate via bus
+    const sendMessageTool = new SendAgentMessageTool({
+      agentId: 'main',
+      sessionId,
+      bus,
+      language: commFormat,
+    })
+
     // If swarm mode is enabled, add the SwarmAgentTool so the main agent can spawn sub-agents
     const agentTools = opts.swarm
       ? [
@@ -122,8 +162,12 @@ const program = new Command()
             tools: sandboxedTools,
             workingDir,
           }),
+          sendMessageTool,
         ]
-      : sandboxedTools
+      : [...sandboxedTools, sendMessageTool]
+
+    // System prompt addendum explaining the bus to the agent
+    const commSystemPrompt = buildCommSystemPrompt('main', commMode, commFormat)
 
     // Create the agent
     const agent = new Agent({
@@ -132,7 +176,10 @@ const program = new Command()
       provider,
       model,
       tools: agentTools,
+      systemPrompt: commSystemPrompt,
       workingDir,
+      bus,
+      sessionId,
     })
 
     // Render TUI
@@ -145,6 +192,8 @@ const program = new Command()
         writePassState={writePassState}
         activePreset={activePreset}
         allRoles={allRoles}
+        bus={bus}
+        commMode={commMode}
       />,
       { exitOnCtrlC: true },
     )

@@ -12,10 +12,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@swarm/bus": "workspace:*",
     "@swarm/config": "workspace:*",
     "@swarm/hermes": "workspace:*",
     "@swarm/orchestrator": "workspace:*",
     "@swarm/providers": "workspace:*",
+    "@swarm/telemetry": "workspace:*",
     "@swarm/tools": "workspace:*",
     "@swarm/tui": "workspace:*",
     "@types/bun": "^1.3.12",

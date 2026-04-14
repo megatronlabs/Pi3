@@ -27,3 +27,7 @@ export { ModelPicker } from './ModelPicker.js'
 export { UserMessage } from './messages/UserMessage.js'
 export { AssistantMessage } from './messages/AssistantMessage.js'
 export { ToolUseMessage } from './messages/ToolUseMessage.js'
+
+// Comms
+export { CommLog } from './CommLog.js'
+export type { CommLogProps } from './CommLog.js'

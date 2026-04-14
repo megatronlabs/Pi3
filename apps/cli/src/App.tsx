@@ -14,6 +14,7 @@ import { messageGrantsWriteApproval } from './trainingWheels.js'
 import type { RoleAssignment } from '@swarm/config'
 import { ROLE_NAMES, listPresets, BUILT_IN_PRESETS } from '@swarm/config'
 import type { RoleName } from '@swarm/config'
+import type { MessageBus, AgentMessage, CommunicationMode } from '@swarm/bus'
 
 interface AppProps {
   agent: Agent
@@ -23,6 +24,8 @@ interface AppProps {
   writePassState?: { approved: boolean }
   activePreset?: string
   allRoles?: Record<RoleName, RoleAssignment>
+  bus?: MessageBus
+  commMode?: CommunicationMode
 }
 
 let _idCounter = 0
@@ -53,7 +56,7 @@ function buildHandoffPrompt(pct: number): string {
   )
 }
 
-export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles }: AppProps) {
+export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode }: AppProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [cost] = useState<number>(0)
@@ -62,6 +65,8 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
   const [taskSummary, setTaskSummary] = useState<TaskSummary | undefined>(undefined)
   const [showAgentPanel, setShowAgentPanel] = useState(false)
   const [coordinator, setCoordinator] = useState<Coordinator | undefined>(undefined)
+  const [commLog, setCommLog] = useState<AgentMessage[]>([])
+  const [showCommLog, setShowCommLog] = useState(false)
 
   // Track the current assistant message id across streaming events
   const assistantMsgIdRef = useRef<string | null>(null)
@@ -110,6 +115,15 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
       coordinator.off('coordinator_event', handler)
     }
   }, [coordinator])
+
+  // Subscribe to bus messages for CommLog
+  useEffect(() => {
+    if (!bus) return
+    const unsub = bus.monitor(msg => {
+      setCommLog(prev => [...prev.slice(-499), msg])
+    })
+    return unsub
+  }, [bus])
 
   // Trigger handoff when context hits the threshold
   useEffect(() => {
@@ -208,10 +222,13 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
     })()
   }, [contextPct, isStreaming, agent])
 
-  // Ctrl+W toggles the AgentPanel
+  // Ctrl+W toggles AgentPanel · Ctrl+L toggles CommLog
   useInput((input: string, key: Key) => {
     if (key.ctrl && input.toLowerCase() === 'w') {
       setShowAgentPanel(prev => !prev)
+    }
+    if (key.ctrl && input.toLowerCase() === 'l') {
+      setShowCommLog(prev => !prev)
     }
   })
 
@@ -446,6 +463,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
           `\n` +
           `Keybindings\n` +
           `  Ctrl+W   Toggle agent panel\n` +
+          `  Ctrl+L   Toggle comm log\n` +
           `  Ctrl+C   Exit`
         )])
         break
@@ -504,6 +522,9 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         workers={workers}
         taskSummary={taskSummary}
         showAgentPanel={showAgentPanel && workers.length > 0}
+        commLog={commLog}
+        showCommLog={showCommLog && commLog.length > 0}
+        commMode={commMode}
       />
     </ThemeProvider>
   )

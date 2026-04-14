@@ -12,7 +12,8 @@
     "chalk": "^5.4.1",
     "figures": "^6.1.0",
     "wrap-ansi": "^9.0.0",
-    "strip-ansi": "^7.1.0"
+    "strip-ansi": "^7.1.0",
+    "@swarm/bus": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.0"

@@ -69,6 +69,31 @@ export const ConfigSchema = z.object({
     approval_required: z.array(z.string()).default([]),
     denied_commands: z.array(z.string()).default([]),
   }).default({}),
+
+  communication: z.object({
+    /**
+     * hermes  — Hermes XML messages (fewer tokens, faster; best for 7B+ and API models)
+     * english — Natural language prose (more readable; better for small local models <4B)
+     */
+    format: z.enum(['hermes', 'english']).default('hermes'),
+    /**
+     * orchestrated  — central orchestrator directs agents; agents report up
+     * choreographed — pre-defined pipeline; each agent passes work to the next
+     * adhoc         — peer-to-peer; any agent messages any other at any time
+     */
+    mode: z.enum(['orchestrated', 'choreographed', 'adhoc']).default('orchestrated'),
+    /** How long (ms) to wait for a banter reply before timing out */
+    await_reply_timeout_ms: z.number().int().positive().default(30_000),
+  }).default({}),
+
+  telemetry: z.object({
+    enabled: z.boolean().default(true),
+    /** OTLP HTTP endpoint, e.g. http://localhost:4318 — empty string = file only */
+    otlp_endpoint: z.string().default(''),
+    /** Log file path. ~ is expanded to $HOME. */
+    log_file: z.string().default('~/.swarm/logs/swarm.log'),
+    log_level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  }).default({}),
 })
 
 export type SwarmConfig = z.infer<typeof ConfigSchema>

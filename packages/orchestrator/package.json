@@ -10,6 +10,7 @@
     "@swarm/providers": "workspace:*",
     "@swarm/tools": "workspace:*",
     "@swarm/hermes": "workspace:*",
+    "@swarm/bus": "workspace:*",
     "zod": "^3.23.0"
   }
 }

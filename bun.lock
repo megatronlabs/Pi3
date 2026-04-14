@@ -17,10 +17,12 @@
         "swarm": "./src/index.tsx",
       },
       "dependencies": {
+        "@swarm/bus": "workspace:*",
         "@swarm/config": "workspace:*",
         "@swarm/hermes": "workspace:*",
         "@swarm/orchestrator": "workspace:*",
         "@swarm/providers": "workspace:*",
+        "@swarm/telemetry": "workspace:*",
         "@swarm/tools": "workspace:*",
         "@swarm/tui": "workspace:*",
         "@types/bun": "^1.3.12",
@@ -29,6 +31,10 @@
         "react": "^19.2.5",
         "react-dom": "^19.2.5",
       },
+    },
+    "packages/bus": {
+      "name": "@swarm/bus",
+      "version": "0.1.0",
     },
     "packages/config": {
       "name": "@swarm/config",
@@ -52,6 +58,7 @@
       "name": "@swarm/orchestrator",
       "version": "0.1.0",
       "dependencies": {
+        "@swarm/bus": "workspace:*",
         "@swarm/hermes": "workspace:*",
         "@swarm/providers": "workspace:*",
         "@swarm/tools": "workspace:*",
@@ -65,6 +72,16 @@
         "@anthropic-ai/sdk": "^0.82.0",
         "@swarm/hermes": "workspace:*",
         "zod": "^3.23.0",
+      },
+    },
+    "packages/telemetry": {
+      "name": "@swarm/telemetry",
+      "version": "0.1.0",
+      "dependencies": {
+        "@swarm/bus": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.12",
       },
     },
     "packages/tools": {
@@ -82,6 +99,7 @@
       "name": "@swarm/tui",
       "version": "0.1.0",
       "dependencies": {
+        "@swarm/bus": "workspace:*",
         "chalk": "^5.4.1",
         "figures": "^6.1.0",
         "ink": "^6.0.0",
@@ -104,6 +122,8 @@
 
     "@babel/runtime": ["@babel/runtime@7.29.2", "", {}, "sha512-JiDShH45zKHWyGe4ZNVRrCjBz8Nh9TMmZG1kh4QTK8hCBTWBi8Da+i7s1fJw7/lYpM4ccepSNfqzZ/QvABBi5g=="],
 
+    "@swarm/bus": ["@swarm/bus@workspace:packages/bus"],
+
     "@swarm/cli": ["@swarm/cli@workspace:apps/cli"],
 
     "@swarm/config": ["@swarm/config@workspace:packages/config"],
@@ -113,6 +133,8 @@
     "@swarm/orchestrator": ["@swarm/orchestrator@workspace:packages/orchestrator"],
 
     "@swarm/providers": ["@swarm/providers@workspace:packages/providers"],
+
+    "@swarm/telemetry": ["@swarm/telemetry@workspace:packages/telemetry"],
 
     "@swarm/tools": ["@swarm/tools@workspace:packages/tools"],
 

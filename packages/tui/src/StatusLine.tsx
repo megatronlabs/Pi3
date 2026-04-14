@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from 'react'
 import { Box, Text } from 'ink'
 import { useTheme } from './theme.js'
+import type { CommunicationMode } from '@swarm/bus'
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 const SEP = ' │ '
+
+const MODE_BADGE: Record<CommunicationMode, string> = {
+  orchestrated:  'orch',
+  choreographed: 'choreo',
+  adhoc:         'adhoc',
+}
 
 interface StatusLineProps {
   appName?: string
@@ -14,6 +21,7 @@ interface StatusLineProps {
   isStreaming?: boolean
   contextPct?: number
   trainingWheels?: boolean
+  commMode?: CommunicationMode
 }
 
 function renderContextBar(pct: number | undefined): string {
@@ -54,6 +62,7 @@ export function StatusLine({
   isStreaming = false,
   contextPct,
   trainingWheels = false,
+  commMode,
 }: StatusLineProps): React.JSX.Element {
   const theme = useTheme()
   const [spinnerIdx, setSpinnerIdx] = useState(0)
@@ -105,6 +114,16 @@ export function StatusLine({
         <>
           <Text color={theme.muted}>{SEP}</Text>
           <Text color={theme.success}>{`$${cost.toFixed(4)}`}</Text>
+        </>
+      )}
+
+      {/* Comm mode badge — only shown when bus is active */}
+      {commMode && (
+        <>
+          <Text color={theme.muted}>{SEP}</Text>
+          <Text color={theme.muted}>{'['}</Text>
+          <Text color={theme.accent}>{MODE_BADGE[commMode]}</Text>
+          <Text color={theme.muted}>{']'}</Text>
         </>
       )}
 
