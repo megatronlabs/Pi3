@@ -17,6 +17,8 @@ import type { CommunicationMode } from '@swarm/bus'
 import { telemetry } from '@swarm/telemetry'
 import { SendAgentMessageTool, buildCommSystemPrompt } from '@swarm/orchestrator'
 import { createMemoryProvider, expandPath } from '@swarm/hub'
+import { McpManager } from '@swarm/mcp'
+import type { McpServerInfo } from '@swarm/mcp'
 
 const program = new Command()
   .name('swarm')
@@ -208,6 +210,15 @@ const program = new Command()
         })
       : adaptedTools
 
+    // MCP servers
+    const mcpManager = new McpManager()
+    if (config.mcp.servers.length > 0) {
+      await mcpManager.connectAll(config.mcp.servers)
+    }
+    const mcpTools = mcpManager.getTools()
+    const allTools = [...sandboxedTools, ...mcpTools as unknown as typeof sandboxedTools[0][]]
+    process.on('exit', () => { mcpManager.disconnectAll() })
+
     // SendAgentMessageTool — always available so agents can communicate via bus
     const sendMessageTool = new SendAgentMessageTool({
       agentId: 'main',
@@ -219,16 +230,16 @@ const program = new Command()
     // If swarm mode is enabled, add the SwarmAgentTool so the main agent can spawn sub-agents
     const agentTools = opts.swarm
       ? [
-          ...sandboxedTools,
+          ...allTools,
           new SwarmAgentTool({
             defaultProvider: provider,
             defaultModel: model,
-            tools: sandboxedTools,
+            tools: allTools,
             workingDir,
           }),
           sendMessageTool,
         ]
-      : [...sandboxedTools, sendMessageTool]
+      : [...allTools, sendMessageTool]
 
     // System prompt addendum explaining the bus to the agent
     const commSystemPrompt = buildCommSystemPrompt('main', commMode, commFormat)
@@ -279,7 +290,8 @@ const program = new Command()
       <App
         agent={agent}
         workingDir={workingDir}
-        adaptedTools={sandboxedTools}
+        adaptedTools={allTools}
+        mcpStatus={mcpManager.getStatus()}
         trainingWheels={opts.trainingWheels ?? false}
         writePassState={writePassState}
         activePreset={activePreset}
@@ -322,7 +334,7 @@ const program = new Command()
               name: `Worker ${i + 1}`,
               provider,
               model,
-              tools: sandboxedTools,
+              tools: allTools,
               workingDir,
               bus,
               registry,

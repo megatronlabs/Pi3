@@ -147,6 +147,16 @@ export const ConfigSchema = z.object({
     /** Keep the hub process alive between CLI sessions */
     persist: z.boolean().default(false),
   }).default({}),
+
+  mcp: z.object({
+    servers: z.array(z.object({
+      name: z.string(),
+      command: z.string(),
+      args: z.array(z.string()).default([]),
+      env: z.record(z.string(), z.string()).default({}),
+      enabled: z.boolean().default(true),
+    })).default([]),
+  }).default({}),
 })
 
 export type SwarmConfig = z.infer<typeof ConfigSchema>

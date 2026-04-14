@@ -36,6 +36,7 @@ interface AppProps {
   onModelSwap?: (provider: string, model: string) => void
   swarmMode?: boolean
   workerFactory?: (count: number) => WorkerPool
+  mcpStatus?: import('@swarm/mcp').McpServerInfo[]
 }
 
 let _idCounter = 0
@@ -64,7 +65,7 @@ function buildHandoffPrompt(pct: number, handoffDir: string): string {
   )
 }
 
-export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId, theme, providers, onModelSwap, swarmMode = false, workerFactory }: AppProps) {
+export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId, theme, providers, onModelSwap, swarmMode = false, workerFactory, mcpStatus }: AppProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [activeTheme, setActiveTheme] = useState<Theme>(theme ?? darkTheme)
   const [isStreaming, setIsStreaming] = useState(false)
@@ -576,13 +577,25 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         )])
         break
 
-      case 'mcp':
-        setMessages(prev => [...prev, systemMsg(
-          `MCP (Model Context Protocol)\n` +
-          `  Status: not connected\n` +
-          `  MCP server integration is planned for Phase 4.`
-        )])
+      case 'mcp': {
+        const servers = mcpStatus ?? []
+        if (servers.length === 0) {
+          setMessages(prev => [...prev, systemMsg(
+            `MCP — no servers configured.\nAdd servers to ~/.swarm/config.toml:\n\n` +
+            `[[mcp.servers]]\nname = "my-server"\ncommand = "npx"\nargs = ["-y", "@my/mcp-server"]`
+          )])
+        } else {
+          const lines = servers.map(s =>
+            `  ${s.name.padEnd(20)} ${s.status.padEnd(12)} ${s.toolCount} tool${s.toolCount !== 1 ? 's' : ''}` +
+            (s.error ? `  ⚠ ${s.error}` : '')
+          ).join('\n')
+          const total = servers.reduce((n, s) => n + s.toolCount, 0)
+          setMessages(prev => [...prev, systemMsg(
+            `MCP Servers (${servers.length})\n${lines}\n\nTotal tools available: ${total}`
+          )])
+        }
         break
+      }
 
       case 'model':
         setShowModelPicker(true)
