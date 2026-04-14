@@ -158,6 +158,30 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
     return unsub
   }, [bus])
 
+  // Inbox polling — inject messages written by external processes into the main agent
+  useEffect(() => {
+    if (!bus) return
+    const seenIds = new Set<string>()
+
+    const poll = async () => {
+      try {
+        const msgs = await bus.readInbox('main')
+        for (const msg of msgs) {
+          if (!seenIds.has(msg.id)) {
+            seenIds.add(msg.id)
+            agent.injectMessage(msg)
+            setCommLog(prev => [...prev.slice(-499), msg])
+          }
+        }
+      } catch {
+        // never crash
+      }
+    }
+
+    const timer = setInterval(poll, 2_000)
+    return () => clearInterval(timer)
+  }, [bus, agent])
+
   // Trigger handoff when context hits the threshold
   useEffect(() => {
     if (

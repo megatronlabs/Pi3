@@ -241,6 +241,9 @@ const program = new Command()
             defaultModel: model,
             tools: allTools,
             workingDir,
+            bus,
+            sessionId,
+            language: commFormat,
           }),
           sendMessageTool,
         ]

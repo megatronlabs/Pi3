@@ -1,7 +1,9 @@
 import { z } from 'zod'
 import type { AgentTool } from './AgentTool.js'
 import { Agent } from './Agent.js'
+import { SendAgentMessageTool } from './SendAgentMessageTool.js'
 import type { Provider } from '@swarm/providers'
+import type { MessageBus, CommunicationLanguage } from '@swarm/bus'
 
 const SwarmAgentInputSchema = z.object({
   task: z.string().describe('The task for the sub-agent to complete'),
@@ -25,6 +27,9 @@ export class SwarmAgentTool implements AgentTool<SwarmAgentInput, string> {
       tools?: AgentTool[]
       workingDir?: string
       providerRegistry?: Map<string, Provider>
+      bus?: MessageBus
+      sessionId?: string
+      language?: CommunicationLanguage
     },
   ) {}
 
@@ -43,14 +48,27 @@ export class SwarmAgentTool implements AgentTool<SwarmAgentInput, string> {
 
     const agentId = `sub-agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
+    // Build tools list, adding SendAgentMessageTool when bus is present
+    const subTools = [...(this.options.tools ?? [])]
+    if (this.options.bus) {
+      subTools.push(new SendAgentMessageTool({
+        agentId,
+        sessionId: this.options.sessionId ?? `session-${Date.now()}`,
+        bus: this.options.bus,
+        language: this.options.language ?? 'hermes',
+      }))
+    }
+
     const agent = new Agent({
       id: agentId,
       name: `SubAgent:${agentId}`,
       provider,
       model,
-      tools: this.options.tools,
+      tools: subTools,
       systemPrompt: input.systemPrompt,
       workingDir,
+      bus: this.options.bus,
+      sessionId: this.options.sessionId,
     })
 
     let accumulatedText = ''
