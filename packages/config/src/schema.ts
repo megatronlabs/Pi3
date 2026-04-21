@@ -48,6 +48,12 @@ export const ConfigSchema = z.object({
     working_dir: z.string().optional(),
     /** Active preset name — 'default' means use [roles] section directly */
     preset: z.string().default('default'),
+    /**
+     * Query each provider's API at startup to populate the model picker with
+     * live model lists. Adds ~1–2 s to startup; off by default.
+     * Enable in config: [defaults] dynamic_models = true
+     */
+    dynamic_models: z.boolean().default(false),
   }).default({}),
 
   /** Per-color theme overrides — applied on top of the named theme */

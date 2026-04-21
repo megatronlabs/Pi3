@@ -3,7 +3,7 @@ import { useInput, type Key } from 'ink'
 import { ThemeProvider, FullscreenLayout, getTheme, THEMES, darkTheme, makeSkillCommand } from '@swarm/tui'
 import type { ChatMessage, MessageContent, AgentWorkerStatus, TaskSummary, Theme, ActionCommand } from '@swarm/tui'
 import type { Agent, AgentTool, WorkerPool } from '@swarm/orchestrator'
-import { Coordinator, SwarmAddTaskTool, SwarmRunTool, TaskGraph } from '@swarm/orchestrator'
+import { Coordinator, ChoreographedCoordinator, SwarmAddTaskTool, SwarmRunTool, TaskGraph } from '@swarm/orchestrator'
 import type { CoordinatorEvent } from '@swarm/orchestrator'
 import type { SlashCommand } from '@swarm/tui'
 import { getContextWindow } from '@swarm/providers'
@@ -81,7 +81,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
   const [workers, setWorkers] = useState<AgentWorkerStatus[]>([])
   const [taskSummary, setTaskSummary] = useState<TaskSummary | undefined>(undefined)
   const [showAgentPanel, setShowAgentPanel] = useState(false)
-  const [coordinator, setCoordinator] = useState<Coordinator | undefined>(undefined)
+  const [coordinator, setCoordinator] = useState<Coordinator | ChoreographedCoordinator | undefined>(undefined)
   const [commLog, setCommLog] = useState<AgentMessage[]>([])
   const [showCommLog, setShowCommLog] = useState(false)
   const [showModelPicker, setShowModelPicker] = useState(false)
@@ -516,7 +516,9 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
             const count = g.getAllTasks().length
             if (count === 0) return
             const pool = workerFactory(count)
-            const coord = new Coordinator(g, pool)
+            const coord = commMode === 'choreographed'
+              ? new ChoreographedCoordinator(g, pool)
+              : new Coordinator(g, pool)
             setCoordinator(coord)
             const workerCount = Math.min(count, 4)
             setMessages(prev => [...prev, {

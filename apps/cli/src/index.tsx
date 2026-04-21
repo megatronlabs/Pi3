@@ -20,6 +20,7 @@ import { createMemoryProvider, expandPath, SkillStore, CreateSkillTool, loadMemo
 import type { Skill, LoadedMemory } from '@swarm/hub'
 import { McpManager } from '@swarm/mcp'
 import type { McpServerInfo } from '@swarm/mcp'
+import { runWizard } from './wizard.js'
 
 const program = new Command()
   .name('swarm')
@@ -29,16 +30,23 @@ const program = new Command()
   .option('-p, --provider <provider>', 'Provider: anthropic | openrouter | ollama | replicate')
   .option('--working-dir <dir>', 'Working directory for tools', process.cwd())
   .option('--init-config', 'Create default config file at ~/.swarm/config.toml and exit')
+  .option('--setup', 'Run the API key setup wizard')
   .option('-s, --swarm', 'Enable swarm mode (agent can spawn sub-agents via spawn_agent tool)')
   .option('--training-wheels', 'Restrict agent to read-only within working directory; writes require user approval')
   .option('--preset <preset>', 'Model preset to use: quality | fast | local | mixed | default')
   .option('--comm-mode <mode>', 'Inter-agent comm mode: orchestrated | choreographed | adhoc')
   .option('--comm-format <format>', 'Message format: hermes | english (default: hermes)')
-  .action(async (opts: { model?: string; provider?: string; workingDir: string; initConfig?: boolean; swarm?: boolean; trainingWheels?: boolean; preset?: string; commMode?: string; commFormat?: string }) => {
+  .action(async (opts: { model?: string; provider?: string; workingDir: string; initConfig?: boolean; setup?: boolean; swarm?: boolean; trainingWheels?: boolean; preset?: string; commMode?: string; commFormat?: string }) => {
     // Handle --init-config flag
     if (opts.initConfig) {
       await initConfig()
       process.stdout.write(`Config initialized at: ${CONFIG_PATH}\n`)
+      process.exit(0)
+    }
+
+    // Handle --setup flag
+    if (opts.setup) {
+      await runWizard()
       process.exit(0)
     }
 
@@ -298,12 +306,76 @@ const program = new Command()
       ...(themeOverrides.input_border && { inputBorder: themeOverrides.input_border }),
     })
 
-    const KNOWN_PROVIDERS = [
+    // ---------------------------------------------------------------------------
+    // Model picker: static fallbacks + optional dynamic fetch
+    // ---------------------------------------------------------------------------
+
+    type ProviderEntry = { id: string; name: string; models: string[] }
+
+    const STATIC_PROVIDERS: ProviderEntry[] = [
       { id: 'anthropic',  name: 'Anthropic',  models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'] },
       { id: 'openrouter', name: 'OpenRouter', models: ['openai/gpt-4o', 'anthropic/claude-opus-4-6', 'meta-llama/llama-3.1-70b-instruct'] },
       { id: 'ollama',     name: 'Ollama',     models: ['gemma3:4b', 'gemma3:12b', 'llama3.2:3b', 'mistral:7b', 'deepseek-r1:7b'] },
       { id: 'replicate',  name: 'Replicate',  models: ['meta/llama-3-70b-instruct', 'mistralai/mistral-7b-instruct-v0.2'] },
     ]
+
+    async function tryFetchModels(timeoutMs: number): Promise<ProviderEntry[]> {
+      const antKey  = resolveProviderKey(config, 'anthropic') ?? ''
+      const orKey   = resolveProviderKey(config, 'openrouter') ?? ''
+      const ollamaBase = resolveBaseUrl(config, 'ollama') ?? 'http://localhost:11434'
+
+      const withTimeout = (p: Promise<string[] | null>): Promise<string[] | null> =>
+        Promise.race([p, new Promise<string[] | null>(r => setTimeout(() => r(null), timeoutMs))])
+
+      const [anthropicModels, openrouterModels, ollamaModels] = await Promise.all([
+        withTimeout(
+          antKey
+            ? fetch('https://api.anthropic.com/v1/models', {
+                headers: { 'x-api-key': antKey, 'anthropic-version': '2023-06-01' },
+              })
+                .then(r => r.ok ? r.json() : null)
+                .then((d: { data?: Array<{ id: string }> } | null) =>
+                  d?.data?.map(m => m.id).filter(Boolean) ?? null
+                )
+                .catch(() => null)
+            : Promise.resolve(null)
+        ),
+
+        withTimeout(
+          orKey
+            ? fetch('https://openrouter.ai/api/v1/models', {
+                headers: { Authorization: `Bearer ${orKey}` },
+              })
+                .then(r => r.ok ? r.json() : null)
+                .then((d: { data?: Array<{ id: string }> } | null) =>
+                  d?.data?.slice(0, 20).map(m => m.id).filter(Boolean) ?? null
+                )
+                .catch(() => null)
+            : Promise.resolve(null)
+        ),
+
+        withTimeout(
+          fetch(`${ollamaBase}/api/tags`)
+            .then(r => r.ok ? r.json() : null)
+            .then((d: { models?: Array<{ name: string }> } | null) =>
+              d?.models?.map(m => m.name).filter(Boolean) ?? null
+            )
+            .catch(() => null)
+        ),
+      ])
+
+      const staticById = new Map(STATIC_PROVIDERS.map(p => [p.id, p]))
+      return [
+        { id: 'anthropic',  name: 'Anthropic',  models: anthropicModels  ?? staticById.get('anthropic')!.models },
+        { id: 'openrouter', name: 'OpenRouter', models: openrouterModels ?? staticById.get('openrouter')!.models },
+        { id: 'ollama',     name: 'Ollama',     models: ollamaModels     ?? staticById.get('ollama')!.models },
+        { id: 'replicate',  name: 'Replicate',  models: staticById.get('replicate')!.models },
+      ]
+    }
+
+    const KNOWN_PROVIDERS: ProviderEntry[] = config.defaults.dynamic_models
+      ? await tryFetchModels(2_000)
+      : STATIC_PROVIDERS
 
     // Render TUI
     const { waitUntilExit } = render(
