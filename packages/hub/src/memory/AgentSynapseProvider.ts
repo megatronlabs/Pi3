@@ -2,94 +2,98 @@ import { readFile } from 'node:fs/promises'
 import type { MemoryProvider, HandoffFiles, MemorySearchResult } from './MemoryProvider.js'
 
 /**
- * AgentSynapseProvider — stub for AgentSynapse / AgentCognose memory backend.
+ * AgentSynapseProvider — MemoryProvider backed by the Hub server's memory API.
  *
- * NOT YET IMPLEMENTED. Logs a warning and falls back to no-op behavior.
+ * Used when config.memory.backend = 'agentcognose'. Routes to agentsynapse_url
+ * (default http://localhost:8000 — the external AgentSynapse / Pi3 hub instance).
  *
- * When AgentSynapse/AgentCognose source is integrated, this provider should:
- *
- *   onHandoffComplete:
- *     1. Read HANDOFF.md → POST to /store_memory with tag 'handoff' + sessionId
- *     2. Read MEMORY.md  → POST to /store_memory with tag 'memory' + project name
- *
- *   store:
- *     → POST /store_memory { content: value, project: namespace, tags: [key] }
- *
- *   get:
- *     → GET /get_memory { project: namespace, key: key }
- *
- *   search:
- *     → POST /search_memories { query, project: namespace, limit }
- *
- * The baseUrl and projectName are wired from config:
- *   memory.agentsynapse_url    (default http://localhost:8000)
- *   memory.agentsynapse_project
+ * All methods call the hub's /api/memory/* endpoints. Network errors are caught
+ * and swallowed — the app never crashes for memory sync failures.
  */
 export class AgentSynapseProvider implements MemoryProvider {
-  readonly backend = 'agentsynapse' as const
+  readonly backend = 'agentcognose' as const
 
   constructor(
-    private baseUrl: string,
-    private projectName: string,
+    private readonly baseUrl: string,
+    private readonly projectName: string,
   ) {}
 
   async onHandoffComplete(files: HandoffFiles): Promise<void> {
-    // TODO: implement when AgentSynapse source is integrated
-    // Placeholder: read files and log what would be stored
     try {
-      const [transcript, memory] = await Promise.all([
+      // Read the files so we can also store their content in the hub for
+      // searchability, in addition to the file-path handoff call.
+      const [, memory] = await Promise.all([
         readFile(files.transcriptPath, 'utf8').catch(() => ''),
         readFile(files.memoryPath, 'utf8').catch(() => ''),
       ])
 
-      // When implemented, these will be API calls:
-      // await this._post('/store_memory', {
-      //   content: transcript,
-      //   project: this.projectName,
-      //   tags: ['handoff', `session:${files.sessionId}`],
-      // })
-      // await this._post('/store_memory', {
-      //   content: memory,
-      //   project: this.projectName,
-      //   tags: ['memory', `session:${files.sessionId}`],
-      // })
+      // POST the file paths to the hub's handoff endpoint — hub reads and stores them.
+      await fetch(`${this.baseUrl}/api/memory/handoff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcriptPath: files.transcriptPath,
+          memoryPath:     files.memoryPath,
+          sessionId:      files.sessionId,
+        }),
+      })
 
-      void transcript
-      void memory
-      process.stderr.write(
-        `[AgentSynapseProvider] Handoff ready to sync to ${this.baseUrl} — ` +
-        `integration pending (set memory.backend = "markdown" to suppress this)\n`,
-      )
+      // Also store the MEMORY.md content under the project namespace so it's
+      // searchable via memory_search across sessions.
+      if (memory) {
+        await this.store(
+          this.projectName,
+          `memory:${files.sessionId}`,
+          memory,
+          { sessionId: files.sessionId, workingDir: files.workingDir },
+        )
+      }
     } catch {
-      // Silent — never crash the app for memory sync
+      // Never crash the app for memory sync failures
     }
   }
 
-  async store(_namespace: string, _key: string, _value: string): Promise<void> {
-    // TODO: POST /store_memory
+  async store(
+    namespace: string,
+    key: string,
+    value: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await fetch(`${this.baseUrl}/api/memory/store`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace, key, value, metadata }),
+      })
+    } catch {
+      // Never crash the app
+    }
   }
 
-  async get(_namespace: string, _key: string): Promise<string | null> {
-    // TODO: GET /get_memory
-    return null
+  async get(namespace: string, key: string): Promise<string | null> {
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/api/memory/${encodeURIComponent(namespace)}/${encodeURIComponent(key)}`,
+      )
+      if (!res.ok) return null
+      const data = (await res.json()) as { value?: string }
+      return data.value ?? null
+    } catch {
+      return null
+    }
   }
 
-  async search(_namespace: string, _query: string, _limit?: number): Promise<MemorySearchResult[]> {
-    // TODO: POST /search_memories
-    return []
+  async search(namespace: string, query: string, limit?: number): Promise<MemorySearchResult[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/memory/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace, query, limit }),
+      })
+      if (!res.ok) return []
+      return (await res.json()) as MemorySearchResult[]
+    } catch {
+      return []
+    }
   }
-
-  // ---------------------------------------------------------------------------
-  // Private HTTP helper (used once implemented)
-  // ---------------------------------------------------------------------------
-
-  // private async _post(path: string, body: unknown): Promise<unknown> {
-  //   const res = await fetch(`${this.baseUrl}${path}`, {
-  //     method: 'POST',
-  //     headers: { 'Content-Type': 'application/json' },
-  //     body: JSON.stringify(body),
-  //   })
-  //   if (!res.ok) throw new Error(`AgentSynapse ${path} → ${res.status}`)
-  //   return res.json()
-  // }
 }

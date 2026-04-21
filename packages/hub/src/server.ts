@@ -11,6 +11,7 @@
  *   SWARM_HUB_DATA_DIR  — absolute path to data directory (default ~/.swarm/hub)
  */
 import { homedir } from 'node:os'
+import { mkdir } from 'node:fs/promises'
 import { HubServer } from './HubServer.js'
 
 function expandPath(p: string): string {
@@ -19,6 +20,11 @@ function expandPath(p: string): string {
 
 const port    = Number(process.env.SWARM_HUB_PORT ?? '7777')
 const dataDir = expandPath(process.env.SWARM_HUB_DATA_DIR ?? '~/.swarm/hub')
+
+// Ensure the data directory exists before the server starts.
+// daemon.ts also creates it, but this guard makes the server safe to launch
+// standalone (e.g. bun run packages/hub/src/server.ts directly).
+await mkdir(dataDir, { recursive: true })
 
 const server = new HubServer({ port, dataDir })
 
