@@ -452,6 +452,19 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
     (text: string) => {
       if (isStreaming) return
 
+      // Handle skill slash commands typed with args (e.g. "/review-pr 42")
+      // Must check before the /theme branch so skills named "theme" aren't blocked.
+      if (text.startsWith('/')) {
+        const spaceIdx = text.indexOf(' ')
+        const cmdName = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx)
+        const cmdArg  = spaceIdx === -1 ? '' : text.slice(spaceIdx + 1).trim()
+        const matchedSkill = dynamicSkillsRef.current.find(s => s.name === cmdName)
+        if (matchedSkill) {
+          onSubmit(matchedSkill.prompt.replace('{input}', cmdArg))
+          return
+        }
+      }
+
       // Handle /theme <name> typed with argument (e.g. "/theme catppuccin")
       if (text.startsWith('/theme ')) {
         const name = text.slice(7).trim()
@@ -709,10 +722,12 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         break
 
       default: {
-        // Check if the command matches a dynamic skill
+        // Check if the command matches a dynamic skill.
+        // Substitute {input} with empty string when invoked via the slash menu
+        // (no trailing text). Typed invocations with args go through onSubmit instead.
         const matchedSkill = dynamicSkillsRef.current.find(s => s.name === command.name)
         if (matchedSkill) {
-          onSubmit(matchedSkill.prompt)
+          onSubmit(matchedSkill.prompt.replace('{input}', ''))
         }
         break
       }
