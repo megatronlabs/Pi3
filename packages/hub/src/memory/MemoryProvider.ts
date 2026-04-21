@@ -18,6 +18,8 @@ export interface HandoffFiles {
   sessionId: string
   /** Context % that triggered the handoff */
   contextPct: number
+  /** Absolute working directory of the session that wrote these files */
+  workingDir: string
 }
 
 export interface MemorySearchResult {

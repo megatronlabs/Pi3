@@ -47,10 +47,13 @@ function nextId(): string {
   return `msg-${++_idCounter}`
 }
 
-function buildHandoffPrompt(pct: number, handoffDir: string): string {
+function buildHandoffPrompt(pct: number, handoffDir: string, workingDir: string, sessionId: string): string {
+  const timestamp = new Date().toISOString()
+  const frontmatter = `---\nworkingDir: ${workingDir}\nsessionId: ${sessionId}\ntimestamp: ${timestamp}\n---`
   return (
     `[SYSTEM] Context window is at ${pct}% capacity. ` +
     `Before this session ends, write a Handoff Transcript and Memory file so the next session can continue seamlessly.\n\n` +
+    `Each file must begin with this exact frontmatter (no blank line before ---):\n${frontmatter}\n\n` +
     `Use the file_write tool to create both files:\n\n` +
     `1. ${handoffDir}/HANDOFF.md — Handoff Transcript:\n` +
     `   - Summary of the current task and conversation\n` +
@@ -215,7 +218,8 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
       assistantMsgIdRef.current = null
 
       try {
-        for await (const event of agent.run(buildHandoffPrompt(pct, resolvedHandoffDir))) {
+        const resolvedSessionId = sessionId ?? agent.sessionId
+        for await (const event of agent.run(buildHandoffPrompt(pct, resolvedHandoffDir, workingDir, resolvedSessionId))) {
           if (event.type === 'text') {
             setMessages(prev => {
               const existingId = assistantMsgIdRef.current
@@ -277,8 +281,9 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
                 transcriptPath: join(resolvedHandoffDir, 'HANDOFF.md'),
                 memoryPath:     join(resolvedHandoffDir, 'MEMORY.md'),
                 timestamp:      new Date(),
-                sessionId:      sessionId ?? agent.sessionId,
+                sessionId:      resolvedSessionId,
                 contextPct:     pct,
+                workingDir,
               }
               memoryProvider.onHandoffComplete(files).catch(() => {
                 // Never crash the app for memory sync failures
@@ -291,7 +296,7 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
         assistantMsgIdRef.current = null
       }
     })()
-  }, [contextPct, contextThreshold, isStreaming, agent, memoryProvider, handoffDir, sessionId])
+  }, [contextPct, contextThreshold, isStreaming, agent, memoryProvider, handoffDir, sessionId, workingDir])
 
   // Ctrl+W toggles AgentPanel · Ctrl+L toggles CommLog · Ctrl+M toggles ModelPicker
   useInput((input: string, key: Key) => {
