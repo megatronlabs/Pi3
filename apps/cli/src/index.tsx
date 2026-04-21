@@ -16,7 +16,7 @@ import { MessageBus, AgentRegistry } from '@swarm/bus'
 import type { CommunicationMode } from '@swarm/bus'
 import { telemetry } from '@swarm/telemetry'
 import { SendAgentMessageTool, buildCommSystemPrompt } from '@swarm/orchestrator'
-import { createMemoryProvider, expandPath, SkillStore, CreateSkillTool, loadMemoryForDir } from '@swarm/hub'
+import { createMemoryProvider, expandPath, SkillStore, CreateSkillTool, loadMemoryForDir, MemorySearchTool, MemoryReadTool } from '@swarm/hub'
 import type { Skill, LoadedMemory } from '@swarm/hub'
 import { McpManager } from '@swarm/mcp'
 import type { McpServerInfo } from '@swarm/mcp'
@@ -238,6 +238,10 @@ const program = new Command()
       language: commFormat,
     })
 
+    // Memory tools — allow the agent to query its own persisted memories
+    const memorySearchTool = new MemorySearchTool(memoryProvider)
+    const memoryReadTool = new MemoryReadTool(memoryProvider)
+
     // If swarm mode is enabled, add the SwarmAgentTool so the main agent can spawn sub-agents
     const agentTools = opts.swarm
       ? [
@@ -252,8 +256,10 @@ const program = new Command()
             language: commFormat,
           }),
           sendMessageTool,
+          memorySearchTool,
+          memoryReadTool,
         ]
-      : [...allTools, sendMessageTool]
+      : [...allTools, sendMessageTool, memorySearchTool, memoryReadTool]
 
     // System prompt addendum explaining the bus to the agent
     const commSystemPrompt = buildCommSystemPrompt('main', commMode, commFormat)
