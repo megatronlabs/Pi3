@@ -22,7 +22,9 @@ export interface MemoryConfig {
 export function createMemoryProvider(cfg: MemoryConfig): MemoryProvider {
   switch (cfg.backend) {
     case 'markdown':
-      return new MarkdownMemoryProvider()
+      return new MarkdownMemoryProvider(
+        expandPath('~/.swarm/hub/memory')
+      )
 
     case 'obsidian': {
       const vault = cfg.obsidian_vault
@@ -30,7 +32,7 @@ export function createMemoryProvider(cfg: MemoryConfig): MemoryProvider {
         process.stderr.write(
           '[swarm] memory.backend = "obsidian" but memory.obsidian_vault is not set — falling back to markdown\n',
         )
-        return new MarkdownMemoryProvider()
+        return new MarkdownMemoryProvider(expandPath('~/.swarm/hub/memory'))
       }
       return new ObsidianMemoryProvider(expandPath(vault))
     }
@@ -48,6 +50,6 @@ export function createMemoryProvider(cfg: MemoryConfig): MemoryProvider {
       )
 
     default:
-      return new MarkdownMemoryProvider()
+      return new MarkdownMemoryProvider(expandPath('~/.swarm/hub/memory'))
   }
 }
