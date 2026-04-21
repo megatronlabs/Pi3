@@ -16,8 +16,8 @@ import { MessageBus, AgentRegistry } from '@swarm/bus'
 import type { CommunicationMode } from '@swarm/bus'
 import { telemetry } from '@swarm/telemetry'
 import { SendAgentMessageTool, buildCommSystemPrompt } from '@swarm/orchestrator'
-import { createMemoryProvider, expandPath, SkillStore, CreateSkillTool } from '@swarm/hub'
-import type { Skill } from '@swarm/hub'
+import { createMemoryProvider, expandPath, SkillStore, CreateSkillTool, loadMemoryForDir } from '@swarm/hub'
+import type { Skill, LoadedMemory } from '@swarm/hub'
 import { McpManager } from '@swarm/mcp'
 import type { McpServerInfo } from '@swarm/mcp'
 
@@ -150,6 +150,12 @@ const program = new Command()
       ? opts.workingDir
       : (config.defaults.working_dir ?? opts.workingDir)
 
+    // Load memory from the most recent matching session for this workingDir
+    const loadedMemory: LoadedMemory | null = await loadMemoryForDir(handoffDir, workingDir)
+    const memorySystemPrompt = loadedMemory
+      ? `\n\n## Memory from previous session (${loadedMemory.timestamp.toISOString().slice(0, 10)})\n\n${loadedMemory.content}`
+      : ''
+
     // Resolve API key and base URL from config (falls back to env vars inside resolver)
     const apiKey = resolveProviderKey(config, providerName)
     const baseUrl = resolveBaseUrl(config, providerName)
@@ -259,7 +265,7 @@ const program = new Command()
       provider,
       model,
       tools: agentTools,
-      systemPrompt: commSystemPrompt,
+      systemPrompt: commSystemPrompt + memorySystemPrompt,
       workingDir,
       bus,
       sessionId,
@@ -314,6 +320,7 @@ const program = new Command()
         providers={KNOWN_PROVIDERS}
         skills={skills}
         skillStore={skillStore}
+        loadedMemory={loadedMemory ?? undefined}
         onModelSwap={(providerId, model) => {
           let newProvider: Provider
           switch (providerId) {

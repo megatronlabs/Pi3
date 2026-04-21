@@ -1,6 +1,8 @@
 export type { MemoryProvider, HandoffFiles, MemorySearchResult, MemoryBackend } from './memory/MemoryProvider.js'
 export { expandPath } from './memory/MemoryProvider.js'
 export { MarkdownMemoryProvider } from './memory/MarkdownMemoryProvider.js'
+export type { LoadedMemory } from './memory/loadMemory.js'
+export { loadMemoryForDir } from './memory/loadMemory.js'
 export { ObsidianMemoryProvider } from './memory/ObsidianMemoryProvider.js'
 export { AgentSynapseProvider } from './memory/AgentSynapseProvider.js'
 export type { MemoryConfig } from './memory/createMemoryProvider.js'

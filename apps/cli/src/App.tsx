@@ -40,6 +40,7 @@ interface AppProps {
   mcpStatus?: import('@swarm/mcp').McpServerInfo[]
   skills?: Skill[]
   skillStore?: SkillStore
+  loadedMemory?: { timestamp: Date; path: string }
 }
 
 let _idCounter = 0
@@ -71,7 +72,7 @@ function buildHandoffPrompt(pct: number, handoffDir: string, workingDir: string,
   )
 }
 
-export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId, theme, providers, onModelSwap, swarmMode = false, workerFactory, mcpStatus, skills, skillStore }: AppProps) {
+export function App({ agent, workingDir, adaptedTools, trainingWheels = false, writePassState, activePreset = 'default', allRoles, bus, commMode, memoryProvider, contextThreshold = 85, handoffDir, sessionId, theme, providers, onModelSwap, swarmMode = false, workerFactory, mcpStatus, skills, skillStore, loadedMemory }: AppProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [activeTheme, setActiveTheme] = useState<Theme>(theme ?? darkTheme)
   const [isStreaming, setIsStreaming] = useState(false)
@@ -108,6 +109,19 @@ export function App({ agent, workingDir, adaptedTools, trainingWheels = false, w
     const remove = agent.appendTools([tool as unknown as import('@swarm/orchestrator').AgentTool])
     return remove
   }, [agent, skillStore])
+
+  // Show a banner on first render if a memory file was loaded from a prior session
+  useEffect(() => {
+    if (!loadedMemory) return
+    const dateStr = loadedMemory.timestamp.toISOString().slice(0, 10)
+    const shortPath = loadedMemory.path.replace(process.env.HOME ?? '', '~')
+    setMessages(prev => [...prev, {
+      id: nextId(),
+      role: 'assistant',
+      content: [{ kind: 'text', text: `Memory loaded from previous session (${dateStr}) — ${shortPath}` }],
+      timestamp: new Date(),
+    }])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const contextWindow = getContextWindow(agent.model)
   const contextPct = contextTokens > 0
