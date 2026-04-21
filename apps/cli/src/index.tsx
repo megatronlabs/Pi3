@@ -15,7 +15,7 @@ import type { Provider } from '@swarm/providers'
 import { MessageBus, AgentRegistry } from '@swarm/bus'
 import type { CommunicationMode } from '@swarm/bus'
 import { telemetry } from '@swarm/telemetry'
-import { SendAgentMessageTool, buildCommSystemPrompt } from '@swarm/orchestrator'
+import { SendAgentMessageTool, buildCommSystemPrompt, RemoteAgentTool } from '@swarm/orchestrator'
 import { createMemoryProvider, expandPath, SkillStore, CreateSkillTool, loadMemoryForDir, MemorySearchTool, MemoryReadTool } from '@swarm/hub'
 import type { Skill, LoadedMemory } from '@swarm/hub'
 import { McpManager } from '@swarm/mcp'
@@ -36,7 +36,8 @@ const program = new Command()
   .option('--preset <preset>', 'Model preset to use: quality | fast | local | mixed | default')
   .option('--comm-mode <mode>', 'Inter-agent comm mode: orchestrated | choreographed | adhoc')
   .option('--comm-format <format>', 'Message format: hermes | english (default: hermes)')
-  .action(async (opts: { model?: string; provider?: string; workingDir: string; initConfig?: boolean; setup?: boolean; swarm?: boolean; trainingWheels?: boolean; preset?: string; commMode?: string; commFormat?: string }) => {
+  .option('--serve [port]', 'Run as a headless HTTP agent server (default port 3001)')
+  .action(async (opts: { model?: string; provider?: string; workingDir: string; initConfig?: boolean; setup?: boolean; swarm?: boolean; trainingWheels?: boolean; preset?: string; commMode?: string; commFormat?: string; serve?: string | boolean }) => {
     // Handle --init-config flag
     if (opts.initConfig) {
       await initConfig()
@@ -266,8 +267,9 @@ const program = new Command()
           sendMessageTool,
           memorySearchTool,
           memoryReadTool,
+          new RemoteAgentTool(),
         ]
-      : [...allTools, sendMessageTool, memorySearchTool, memoryReadTool]
+      : [...allTools, sendMessageTool, memorySearchTool, memoryReadTool, new RemoteAgentTool()]
 
     // System prompt addendum explaining the bus to the agent
     const commSystemPrompt = buildCommSystemPrompt('main', commMode, commFormat)
@@ -376,6 +378,75 @@ const program = new Command()
     const KNOWN_PROVIDERS: ProviderEntry[] = config.defaults.dynamic_models
       ? await tryFetchModels(2_000)
       : STATIC_PROVIDERS
+
+    // -------------------------------------------------------------------------
+    // --serve mode: headless HTTP agent server
+    // -------------------------------------------------------------------------
+    if (opts.serve !== undefined && opts.serve !== false) {
+      const servePort = typeof opts.serve === 'string' ? Number(opts.serve) : 3001
+      process.stderr.write(`[serve] Pi3 agent server on port ${servePort}  model: ${model}  provider: ${providerName}\n`)
+
+      Bun.serve({
+        port: servePort,
+        async fetch(req: Request): Promise<Response> {
+          const url = new URL(req.url)
+
+          if (req.method === 'GET' && url.pathname === '/health') {
+            return new Response(JSON.stringify({ status: 'ok', model, provider: providerName }), {
+              headers: { 'Content-Type': 'application/json' },
+            })
+          }
+
+          if (req.method === 'POST' && url.pathname === '/agent/run') {
+            const body = (await req.json()) as { prompt?: string }
+            if (!body.prompt) {
+              return new Response(JSON.stringify({ error: 'prompt required' }), { status: 400 })
+            }
+
+            // SSE streaming response
+            const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+            const writer = writable.getWriter()
+            const enc = new TextEncoder()
+
+            const send = (data: unknown): void => {
+              writer.write(enc.encode(`data: ${JSON.stringify(data)}\n\n`)).catch(() => {})
+            }
+
+            ;(async () => {
+              try {
+                for await (const event of agent.run(body.prompt!)) {
+                  send(event)
+                  if (event.type === 'done' || event.type === 'error') break
+                }
+              } catch (err) {
+                send({ type: 'error', message: String(err) })
+              } finally {
+                send('[DONE]')
+                writer.close().catch(() => {})
+              }
+            })()
+
+            return new Response(readable, {
+              headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                Connection: 'keep-alive',
+              },
+            })
+          }
+
+          if (req.method === 'POST' && url.pathname === '/agent/reset') {
+            agent.reset()
+            return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+          }
+
+          return new Response(JSON.stringify({ error: 'not found' }), { status: 404 })
+        },
+      })
+
+      // Keep alive — no TUI in serve mode
+      await new Promise<never>(() => {})
+    }
 
     // Render TUI
     const { waitUntilExit } = render(
